@@ -122,18 +122,6 @@ npm run dev
 
 ---
 
-## 👨‍💻 Team
-
-| Name | Module                                                   |
-| ---- | -------------------------------------------------------- |
-| —    | Citizen-facing app                                       |
-| —    | Admin dashboard                                          |
-| —    | Core algorithms (duplicate detection + priority scoring) |
-| —    | Real-time system + analytics                             |
-| —    | Auth, architecture, deployment, integration              |
-
----
-
 ## 📄 License
 
 This project is developed as an academic capstone project.
