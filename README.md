@@ -56,6 +56,24 @@ priorityScore = (reportCount × W1) + (categorySeverityWeight × W2) + (daysOpen
 
 ---
 
+## 📊 Data Flow Diagrams (DFD)
+
+### DFD Level 0 — Context Diagram
+
+Shows the system as a single process interacting with external entities.
+
+```mermaid
+flowchart LR
+    Citizen((Citizen)) -- Report issue / view status --> SYS[["Nivaran System"]]
+    Staff((Municipal Staff)) -- Update ticket status --> SYS
+    Admin((Municipality Admin)) -- Assign / monitor / resolve disputes --> SYS
+    Public((General Public)) -- View transparency data --> SYS
+    SYS -- Status updates / notifications --> Citizen
+    SYS -- Assigned tickets --> Staff
+    SYS -- Reports / analytics --> Admin
+    SYS -- Public stats --> Public
+```
+
 ## 🚀 Getting Started
 
 ### Prerequisites
