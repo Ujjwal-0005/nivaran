@@ -26,7 +26,7 @@ Citizens face broken infrastructure daily — potholes, overflowing garbage, fau
 - ⏱️ **SLA timers & auto-escalation** — unresolved tickets past deadline get flagged and bumped in priority
 - 🧑‍🤝‍🧑 **Load-balanced staff assignment** within departments
 - 🌐 **Public transparency dashboard** — anyone can view department-wise resolution stats, no login required
-- 🕵️ **Anonymous reporting option**
+- 🕵️ **Anonymous reporting option**v
 - 💬 **Comment/update threads** on each report
 - 🤖 **AI-assisted auto-categorization** (added as an enhancement layer, with graceful fallback to manual/rule-based categorization)
 
@@ -72,6 +72,32 @@ flowchart LR
     SYS -- Assigned tickets --> Staff
     SYS -- Reports / analytics --> Admin
     SYS -- Public stats --> Public
+```
+
+### DFD Level 1 — Major Processes
+
+Breaks the single system process into its core functional processes and data stores.
+
+```mermaid
+flowchart TB
+    Citizen((Citizen)) --> P1[1.0 Manage Auth & Profile]
+    Citizen --> P2[2.0 Report Issue]
+    Staff((Staff)) --> P4[4.0 Resolve Assigned Ticket]
+    Admin((Admin)) --> P5[5.0 Assign & Escalate]
+    Admin --> P6[6.0 View Analytics]
+    Public((Public)) --> P6
+
+    P1 <--> D1[(D1: Users)]
+    P2 --> P3[3.0 Duplicate Detection & Priority Scoring]
+    P3 <--> D2[(D2: Reports)]
+    P5 <--> D2
+    P5 <--> D3[(D3: Departments/Staff)]
+    P4 <--> D2
+    P4 --> P7[7.0 Notify Citizen]
+    P5 --> P7
+    P7 -.-> Citizen
+    P6 <--> D2
+    P6 <--> D3
 ```
 
 ## 🚀 Getting Started
