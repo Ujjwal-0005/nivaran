@@ -98,10 +98,10 @@ flowchart TB
     B2 --> C2
     B5 --> C1
     B6 --> C3
-    B6 -.Socket.io realtime.-> A1
-    B6 -.Socket.io realtime.-> A2
+    B6 -.->|realtime| A1
+    B6 -.->|realtime| A2
     B7 --> C1
-    B8 -.optional call.-> C5
+    B8 -.->|optional call| C5
     A1 --> C4
     A3 --> C4
 ```
