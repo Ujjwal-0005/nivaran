@@ -56,6 +56,56 @@ priorityScore = (reportCount × W1) + (categorySeverityWeight × W2) + (daysOpen
 
 ---
 
+## 🏗️ System Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client["Client Layer"]
+        A1[Citizen Web App]
+        A2[Staff Dashboard]
+        A3[Admin Dashboard]
+        A4[Public Transparency Page]
+    end
+
+    subgraph Server["Application Server - Node.js/Express"]
+        B1[Auth Service - JWT + OTP]
+        B2[Report Service]
+        B3[Duplicate Detection Engine]
+        B4[Priority Scoring Engine]
+        B5[Assignment / SLA Engine]
+        B6[Notification Service]
+        B7[Analytics Service]
+        B8[AI Categorization - enhancement layer]
+    end
+
+    subgraph External["External Free Services"]
+        C1[(MongoDB Atlas)]
+        C2[Cloudinary - Image Storage]
+        C3[Nodemailer - Email]
+        C4[Leaflet + OpenStreetMap]
+        C5[Gemini API - optional]
+    end
+
+    A1 --> B1
+    A2 --> B1
+    A3 --> B1
+    A4 --> B7
+
+    B1 --> C1
+    B2 --> B3
+    B3 --> B4
+    B4 --> C1
+    B2 --> C2
+    B5 --> C1
+    B6 --> C3
+    B6 -.Socket.io realtime.-> A1
+    B6 -.Socket.io realtime.-> A2
+    B7 --> C1
+    B8 -.optional call.-> C5
+    A1 --> C4
+    A3 --> C4
+```
+
 ## 📊 Data Flow Diagrams (DFD)
 
 ### DFD Level 0 — Context Diagram
