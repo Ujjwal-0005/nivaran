@@ -150,6 +150,32 @@ flowchart TB
     P6 <--> D3
 ```
 
+### DFD Level 2 — Expansion of "2.0 Report Issue"
+
+Zooms into the report-submission process, the current active build area.
+
+```mermaid
+flowchart TB
+    Citizen((Citizen)) --> S1[2.1 Capture Location - Geolocation API]
+    Citizen --> S2[2.2 Upload Photo - Cloudinary]
+    Citizen --> S3[2.3 Enter Category & Description]
+    S1 --> S4[2.4 Check for Nearby Duplicates - Haversine]
+    S2 --> S4
+    S3 --> S4
+    S4 -- Similar report found --> S5[2.5 Confirm Merge with Citizen]
+    S4 -- No match --> S6[2.6 Generate Ticket ID]
+    S5 -- Confirmed --> D2[(D2: Reports)]
+    S6 --> S7[2.7 Auto-route to Department]
+    S7 --> D2
+    S7 --> D3[(D3: Departments/Staff)]
+    S6 --> S8[2.8 Compute Initial Priority Score]
+    S8 --> D2
+```
+
+> Diagrams reflect the design as of the current planning phase. They'll be updated as implementation progresses — Level 2 diagrams for Assignment/SLA (4.0) and Analytics (6.0) will be added once those modules are underway.
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
