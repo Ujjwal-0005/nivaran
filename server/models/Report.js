@@ -16,6 +16,11 @@ const reportSchema = new mongoose.Schema({
     ref: 'Category',
     required: true,
   },
+  department: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Department',
+    required: true,
+  },
   description: {
     type: String,
     required: true,
@@ -38,6 +43,10 @@ const reportSchema = new mongoose.Schema({
     enum: ['reported', 'acknowledged', 'in_progress', 'resolved'],
     default: 'reported',
   },
+  isAnonymous: {
+    type: Boolean,
+    default: false,
+  },
   reportCount: {
     type: Number,
     default: 1,
@@ -46,9 +55,9 @@ const reportSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
   }],
-  createdAt: {
-    type: Date,
-    default: Date.now,
+  priorityScore: {
+    type: Number,
+    default: 0,
   },
 }, {
   timestamps: true,
