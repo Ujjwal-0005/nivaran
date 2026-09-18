@@ -1,6 +1,7 @@
 import Report from '../models/Report.js'
 import Category from '../models/Category.js'
 import { checkForDuplicate } from '../algorithms/duplicateDetection.js'
+import { calculatePriorityScore, calculateDaysOpen } from '../algorithms/priorityScoring.js'
 import imagekit from '../config/imagekit.js'
 import { toFile } from '@imagekit/nodejs'
 
@@ -17,8 +18,11 @@ export const submitReport = async (req, res) => {
     console.log('Submit report - req.body:', req.body)
     console.log('Submit report - req.file:', req.file)
     
-    const { category, description, lat, lng, isAnonymous } = req.body
+    const { category, description, lat, lng, isAnonymous, forceNew } = req.body
     const userId = req.user.userId
+
+    const isAnonymousBool = isAnonymous === 'true' || isAnonymous === true
+    const forceNewBool = forceNew === 'true' || forceNew === true
 
     // Validate required fields
     if (!category || !description || !lat || !lng) {
@@ -35,17 +39,29 @@ export const submitReport = async (req, res) => {
       return res.status(400).json({ message: 'Category has no associated department' })
     }
 
-    // Check for duplicate (placeholder for Phase 4)
-    const duplicateReport = await checkForDuplicate({
-      category,
-      location: { lat, lng },
-    })
-
-    if (duplicateReport) {
-      return res.status(409).json({
-        message: 'A similar report already exists',
-        duplicateTicketId: duplicateReport.ticketId,
+    // Check for duplicate unless forceNew flag is set
+    if (!forceNewBool) {
+      const duplicateReport = await checkForDuplicate({
+        category,
+        location: { lat: parseFloat(lat), lng: parseFloat(lng) },
       })
+
+      if (duplicateReport) {
+        return res.status(200).json({
+          possibleDuplicate: true,
+          existingReport: {
+            id: duplicateReport._id,
+            ticketId: duplicateReport.ticketId,
+            category: categoryDoc.name,
+            description: duplicateReport.description,
+            photoUrl: duplicateReport.photoUrl,
+            location: duplicateReport.location,
+            status: duplicateReport.status,
+            createdAt: duplicateReport.createdAt,
+            reportCount: duplicateReport.reportCount,
+          },
+        })
+      }
     }
 
     // Generate ticket ID
@@ -74,7 +90,7 @@ export const submitReport = async (req, res) => {
       department: categoryDoc.department._id,
       description,
       location: { lat: parseFloat(lat), lng: parseFloat(lng) },
-      isAnonymous: isAnonymous || false,
+      isAnonymous: isAnonymousBool,
       reportedBy: [userId],
     }
 
@@ -105,6 +121,19 @@ export const submitReport = async (req, res) => {
 
     const report = await Report.create(reportData)
 
+    // Calculate initial priority score
+    const daysOpen = calculateDaysOpen(report.createdAt)
+    const severityWeight = categoryDoc.severityWeight || 1
+    report.priorityScore = calculatePriorityScore({
+      reportCount: report.reportCount,
+      severityWeight,
+      daysOpen,
+      upvotes: report.upvotes.length,
+    })
+    await report.save()
+
+    console.log('Report created with priority score:', report.priorityScore)
+
     res.status(201).json({
       message: 'Report submitted successfully',
       ticketId: report.ticketId,
@@ -119,12 +148,105 @@ export const submitReport = async (req, res) => {
         status: report.status,
         isAnonymous: report.isAnonymous,
         createdAt: report.createdAt,
+        priorityScore: report.priorityScore,
       },
     })
   } catch (error) {
     console.error('Submit report error:', error)
     console.error('Error stack:', error.stack)
     res.status(500).json({ message: 'Server error during report submission' })
+  }
+}
+
+// Upvote a report (citizen only)
+export const upvoteReport = async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user.userId
+
+    const report = await Report.findById(id).populate('category')
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    // Check if user already upvoted
+    if (report.upvotes.includes(userId)) {
+      return res.status(400).json({ message: 'You have already upvoted this report' })
+    }
+
+    // Add user to upvotes array
+    report.upvotes.push(userId)
+
+    // Recalculate priority score
+    const daysOpen = calculateDaysOpen(report.createdAt)
+    const severityWeight = report.category.severityWeight || 1
+    report.priorityScore = calculatePriorityScore({
+      reportCount: report.reportCount,
+      severityWeight,
+      daysOpen,
+      upvotes: report.upvotes.length,
+    })
+
+    await report.save()
+
+    res.status(200).json({
+      message: 'Successfully upvoted report',
+      report: {
+        id: report._id,
+        upvotes: report.upvotes.length,
+        priorityScore: report.priorityScore,
+      },
+    })
+  } catch (error) {
+    console.error('Upvote report error:', error)
+    res.status(500).json({ message: 'Server error upvoting report' })
+  }
+}
+
+// Join an existing report as a duplicate (citizen only)
+export const joinReport = async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user.userId
+
+    const report = await Report.findById(id).populate('category')
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    // Check if user already reported this issue
+    if (report.reportedBy.includes(userId)) {
+      return res.status(400).json({ message: 'You have already reported this issue' })
+    }
+
+    // Add user to reportedBy array
+    report.reportedBy.push(userId)
+    report.reportCount += 1
+
+    // Recalculate priority score
+    const daysOpen = calculateDaysOpen(report.createdAt)
+    const severityWeight = report.category.severityWeight || 1
+    report.priorityScore = calculatePriorityScore({
+      reportCount: report.reportCount,
+      severityWeight,
+      daysOpen,
+      upvotes: report.upvotes.length,
+    })
+
+    await report.save()
+
+    res.status(200).json({
+      message: 'Successfully joined report',
+      report: {
+        id: report._id,
+        ticketId: report.ticketId,
+        reportCount: report.reportCount,
+        priorityScore: report.priorityScore,
+      },
+    })
+  } catch (error) {
+    console.error('Join report error:', error)
+    res.status(500).json({ message: 'Server error joining report' })
   }
 }
 
@@ -144,7 +266,24 @@ export const getMyReports = async (req, res) => {
       .populate('citizen', 'name email')
       .sort({ createdAt: -1 })
 
-    res.status(200).json({ reports })
+    // Recalculate priority scores for all reports
+    const reportsWithPriority = reports.map(report => {
+      const daysOpen = calculateDaysOpen(report.createdAt)
+      const severityWeight = report.category?.severityWeight || 1
+      const priorityScore = calculatePriorityScore({
+        reportCount: report.reportCount,
+        severityWeight,
+        daysOpen,
+        upvotes: report.upvotes.length,
+      })
+
+      // Update the report object with calculated priority
+      const reportObj = report.toObject()
+      reportObj.priorityScore = priorityScore
+      return reportObj
+    })
+
+    res.status(200).json({ reports: reportsWithPriority })
   } catch (error) {
     console.error('Get my reports error:', error)
     res.status(500).json({ message: 'Server error fetching reports' })
@@ -166,7 +305,20 @@ export const getReportById = async (req, res) => {
       return res.status(404).json({ message: 'Report not found' })
     }
 
-    res.status(200).json({ report })
+    // Recalculate priority score
+    const daysOpen = calculateDaysOpen(report.createdAt)
+    const severityWeight = report.category?.severityWeight || 1
+    const priorityScore = calculatePriorityScore({
+      reportCount: report.reportCount,
+      severityWeight,
+      daysOpen,
+      upvotes: report.upvotes.length,
+    })
+
+    const reportObj = report.toObject()
+    reportObj.priorityScore = priorityScore
+
+    res.status(200).json({ report: reportObj })
   } catch (error) {
     console.error('Get report by ID error:', error)
     res.status(500).json({ message: 'Server error fetching report' })

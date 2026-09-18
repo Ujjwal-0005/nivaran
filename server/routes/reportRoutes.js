@@ -1,5 +1,5 @@
 import express from 'express'
-import { submitReport, getMyReports, getReportById } from '../controllers/reportController.js'
+import { submitReport, getMyReports, getReportById, joinReport, upvoteReport } from '../controllers/reportController.js'
 import { auth } from '../middleware/auth.js'
 import { roleCheck } from '../middleware/roleCheck.js'
 import upload from '../middleware/upload.js'
@@ -13,6 +13,22 @@ router.post(
   roleCheck('citizen'),
   upload.single('photo'),
   submitReport
+)
+
+// Join an existing report as duplicate (citizen only)
+router.post(
+  '/:id/join',
+  auth,
+  roleCheck('citizen'),
+  joinReport
+)
+
+// Upvote a report (citizen only)
+router.post(
+  '/:id/upvote',
+  auth,
+  roleCheck('citizen'),
+  upvoteReport
 )
 
 // Get citizen's own reports (citizen only)
