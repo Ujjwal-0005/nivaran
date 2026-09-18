@@ -52,6 +52,15 @@ function ReportDetail() {
     }
   }
 
+  const handleUpvote = async () => {
+    try {
+      await api.post(`/api/reports/${id}/upvote`)
+      fetchReport()
+    } catch (err) {
+      console.error('Failed to upvote:', err)
+    }
+  }
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>
   }
@@ -146,6 +155,16 @@ function ReportDetail() {
               <p className="text-gray-500">Priority Score</p>
               <p className="text-gray-800">{report.priorityScore}</p>
             </div>
+          </div>
+
+          <div className="mt-6 pt-6 border-t">
+            <button
+              onClick={handleUpvote}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+            >
+              <span>👍</span>
+              <span>Upvote ({report.upvotes?.length || 0})</span>
+            </button>
           </div>
         </div>
       </div>

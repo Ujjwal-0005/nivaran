@@ -40,6 +40,22 @@ function MyReports() {
     }
   }
 
+  const getPriorityColor = (score) => {
+    if (score >= 50) return 'bg-red-500'
+    if (score >= 25) return 'bg-yellow-500'
+    return 'bg-green-500'
+  }
+
+  const handleUpvote = async (e, reportId) => {
+    e.stopPropagation()
+    try {
+      await api.post(`/api/reports/${reportId}/upvote`)
+      fetchMyReports()
+    } catch (err) {
+      console.error('Failed to upvote:', err)
+    }
+  }
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>
   }
@@ -71,8 +87,15 @@ function MyReports() {
               <div
                 key={report._id}
                 onClick={() => navigate(`/citizen/reports/${report._id}`)}
-                className="bg-white rounded-lg shadow p-6 cursor-pointer hover:shadow-lg transition"
+                className="bg-white rounded-lg shadow p-6 cursor-pointer hover:shadow-lg transition relative"
               >
+                <div className="absolute top-2 right-2">
+                  <div
+                    className={`w-3 h-3 rounded-full ${getPriorityColor(report.priorityScore || 0)}`}
+                    title={`Priority Score: ${report.priorityScore || 0}`}
+                  />
+                </div>
+                
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <h3 className="font-semibold text-gray-800">{report.ticketId}</h3>
@@ -95,9 +118,18 @@ function MyReports() {
                   {report.description}
                 </p>
                 
-                <p className="text-xs text-gray-500">
-                  {new Date(report.createdAt).toLocaleDateString()}
-                </p>
+                <div className="flex justify-between items-center">
+                  <p className="text-xs text-gray-500">
+                    {new Date(report.createdAt).toLocaleDateString()}
+                  </p>
+                  <button
+                    onClick={(e) => handleUpvote(e, report._id)}
+                    className="flex items-center gap-1 text-sm text-gray-600 hover:text-blue-600 transition"
+                  >
+                    <span>👍</span>
+                    <span>{report.upvotes?.length || 0}</span>
+                  </button>
+                </div>
               </div>
             ))}
           </div>
