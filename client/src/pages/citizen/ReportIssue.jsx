@@ -45,6 +45,8 @@ function ReportIssue() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [position, setPosition] = useState(null)
+  const [possibleDuplicate, setPossibleDuplicate] = useState(null)
+  const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false)
 
   const navigate = useNavigate()
 
@@ -59,11 +61,23 @@ function ReportIssue() {
       const response = await api.get('/api/categories')
       setCategories(response.data.categories)
     } catch (err) {
-      setError('Failed to load categories')
+      console.error('Failed to fetch categories:', err)
+      setError('Failed to load categories. Please try again.')
     } finally {
       setLoading(false)
     }
   }
+
+  // Keep formData lat/lng in sync with position marker
+  useEffect(() => {
+    if (position) {
+      setFormData(prev => ({
+        ...prev,
+        lat: position[0],
+        lng: position[1],
+      }))
+    }
+  }, [position])
 
   const getUserLocation = () => {
     if (navigator.geolocation) {
@@ -95,7 +109,7 @@ function ReportIssue() {
     }
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e, forceNew = false) => {
     e.preventDefault()
     setError('')
     setSuccess('')
@@ -114,6 +128,7 @@ function ReportIssue() {
       formDataToSend.append('lat', formData.lat)
       formDataToSend.append('lng', formData.lng)
       formDataToSend.append('isAnonymous', formData.isAnonymous)
+      formDataToSend.append('forceNew', forceNew)
       
       if (photo) {
         formDataToSend.append('photo', photo)
@@ -124,6 +139,14 @@ function ReportIssue() {
           'Content-Type': 'multipart/form-data',
         },
       })
+
+      // Check if possible duplicate was found
+      if (response.data.possibleDuplicate) {
+        setPossibleDuplicate(response.data.existingReport)
+        setShowDuplicateConfirm(true)
+        setSubmitting(false)
+        return
+      }
 
       setSuccess(`Your report has been filed as ${response.data.ticketId}`)
       
@@ -136,6 +159,31 @@ function ReportIssue() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const handleJoinDuplicate = async () => {
+    if (!possibleDuplicate) return
+
+    try {
+      setSubmitting(true)
+      await api.post(`/api/reports/${possibleDuplicate.id}/join`)
+      setSuccess('Your report has been added to the existing issue')
+      setShowDuplicateConfirm(false)
+      
+      setTimeout(() => {
+        navigate('/citizen/reports')
+      }, 2000)
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to join report')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleForceNew = () => {
+    setShowDuplicateConfirm(false)
+    setPossibleDuplicate(null)
+    handleSubmit(new Event('submit'), true)
   }
 
   if (loading) {
@@ -250,6 +298,46 @@ function ReportIssue() {
             {submitting ? 'Submitting...' : 'Submit Report'}
           </button>
         </form>
+
+        {showDuplicateConfirm && possibleDuplicate && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+            <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4">
+              <h2 className="text-xl font-bold text-gray-800 mb-4">Possible Duplicate Found</h2>
+              <p className="text-gray-600 mb-4">
+                A similar issue was reported nearby recently. Is this the same issue?
+              </p>
+              
+              <div className="bg-gray-50 rounded p-4 mb-4">
+                <p className="font-semibold text-gray-800">{possibleDuplicate.ticketId}</p>
+                <p className="text-sm text-gray-600">{possibleDuplicate.category}</p>
+                <p className="text-sm text-gray-600 mt-2">{possibleDuplicate.description}</p>
+                {possibleDuplicate.photoUrl && (
+                  <img src={possibleDuplicate.photoUrl} alt="Existing report" className="mt-2 h-32 w-auto rounded" />
+                )}
+                <p className="text-xs text-gray-500 mt-2">
+                  Reported {new Date(possibleDuplicate.createdAt).toLocaleDateString()} • {possibleDuplicate.reportCount} report(s)
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleJoinDuplicate}
+                  disabled={submitting}
+                  className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition disabled:bg-gray-400"
+                >
+                  {submitting ? 'Joining...' : 'Yes, same issue'}
+                </button>
+                <button
+                  onClick={handleForceNew}
+                  disabled={submitting}
+                  className="flex-1 bg-gray-600 text-white py-2 rounded-lg hover:bg-gray-700 transition disabled:bg-gray-400"
+                >
+                  {submitting ? 'Creating...' : 'No, different issue'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
