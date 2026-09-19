@@ -300,6 +300,7 @@ export const getReportById = async (req, res) => {
       .populate('department')
       .populate('citizen', 'name email')
       .populate('reportedBy', 'name email')
+      .populate('comments.author', 'name role')
 
     if (!report) {
       return res.status(404).json({ message: 'Report not found' })
@@ -322,5 +323,214 @@ export const getReportById = async (req, res) => {
   } catch (error) {
     console.error('Get report by ID error:', error)
     res.status(500).json({ message: 'Server error fetching report' })
+  }
+}
+
+// Add a comment to a report (any logged-in role)
+export const addComment = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { text } = req.body
+    const userId = req.user.userId
+    const userRole = req.user.role
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: 'Comment text is required' })
+    }
+
+    const report = await Report.findById(id)
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    const comment = {
+      author: userId,
+      authorRole: userRole,
+      text: text.trim(),
+      createdAt: new Date(),
+    }
+
+    report.comments.push(comment)
+    await report.save()
+
+    // Re-fetch with populated author for the response
+    const updatedReport = await Report.findById(id).populate('comments.author', 'name role')
+    const newComment = updatedReport.comments[updatedReport.comments.length - 1]
+
+    res.status(201).json({
+      message: 'Comment added successfully',
+      comment: newComment,
+    })
+  } catch (error) {
+    console.error('Add comment error:', error)
+    res.status(500).json({ message: 'Server error adding comment' })
+  }
+}
+
+// Rate a resolved report (citizen only)
+export const rateReport = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { score, feedback } = req.body
+    const userId = req.user.userId
+
+    // Validate score
+    const scoreNum = parseInt(score, 10)
+    if (!scoreNum || scoreNum < 1 || scoreNum > 5) {
+      return res.status(400).json({ message: 'Score must be a number between 1 and 5' })
+    }
+
+    const report = await Report.findById(id)
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    // Only the original citizen can rate
+    if (report.citizen.toString() !== userId) {
+      return res.status(403).json({ message: 'Only the report author can rate this report' })
+    }
+
+    // Must be resolved
+    if (report.status !== 'resolved') {
+      return res.status(400).json({ message: 'You can only rate a resolved report' })
+    }
+
+    // Block duplicate rating
+    if (report.rating && report.rating.score) {
+      return res.status(400).json({ message: 'You have already rated this report' })
+    }
+
+    report.rating = { score: scoreNum, feedback: feedback || '' }
+    await report.save()
+
+    res.status(200).json({
+      message: 'Rating submitted successfully',
+      rating: report.rating,
+    })
+  } catch (error) {
+    console.error('Rate report error:', error)
+    res.status(500).json({ message: 'Server error submitting rating' })
+  }
+}
+
+// Dispute a resolved report (citizen only)
+export const disputeReport = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { reason } = req.body
+    const userId = req.user.userId
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: 'Dispute reason is required' })
+    }
+
+    const report = await Report.findById(id)
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    // Only the original citizen can dispute
+    if (report.citizen.toString() !== userId) {
+      return res.status(403).json({ message: 'Only the report author can dispute this report' })
+    }
+
+    // Must be resolved to dispute
+    if (report.status !== 'resolved') {
+      return res.status(400).json({ message: 'You can only dispute a resolved report' })
+    }
+
+    // Prevent disputing again
+    if (report.isDisputed) {
+      return res.status(400).json({ message: 'This report has already been disputed' })
+    }
+
+    report.isDisputed = true
+    report.disputeReason = reason.trim()
+    report.status = 'disputed'
+    await report.save()
+
+    res.status(200).json({
+      message: 'Dispute submitted. The municipal admin will review this report.',
+      status: report.status,
+      isDisputed: report.isDisputed,
+    })
+  } catch (error) {
+    console.error('Dispute report error:', error)
+    res.status(500).json({ message: 'Server error submitting dispute' })
+  }
+}
+
+// Get nearby open reports (any logged-in user)
+export const getNearbyReports = async (req, res) => {
+  try {
+    const { lat, lng, radius } = req.query
+
+    if (!lat || !lng) {
+      return res.status(400).json({ message: 'lat and lng query parameters are required' })
+    }
+
+    const userLat = parseFloat(lat)
+    const userLng = parseFloat(lng)
+    const radiusMeters = parseFloat(radius) || 2000
+
+    if (isNaN(userLat) || isNaN(userLng)) {
+      return res.status(400).json({ message: 'Invalid lat/lng values' })
+    }
+
+    // Fetch all open reports (not resolved or disputed)
+    const openReports = await Report.find({
+      status: { $in: ['reported', 'acknowledged', 'in_progress'] },
+    })
+      .populate('category', 'name severityWeight')
+      .select('-citizen -reportedBy -comments -rating -disputeReason')
+
+    // Filter by haversine distance in-memory
+    const { haversineDistance } = await import('../algorithms/duplicateDetection.js')
+
+    const nearbyReports = openReports
+      .map(report => {
+        const distance = haversineDistance(
+          userLat,
+          userLng,
+          report.location.lat,
+          report.location.lng
+        )
+        return { report, distance }
+      })
+      .filter(({ distance }) => distance <= radiusMeters)
+      .sort((a, b) => b.report.priorityScore - a.report.priorityScore)
+      .map(({ report, distance }) => {
+        const daysOpen = calculateDaysOpen(report.createdAt)
+        const severityWeight = report.category?.severityWeight || 1
+        const priorityScore = calculatePriorityScore({
+          reportCount: report.reportCount,
+          severityWeight,
+          daysOpen,
+          upvotes: report.upvotes.length,
+        })
+
+        return {
+          id: report._id,
+          ticketId: report.ticketId,
+          category: report.category?.name,
+          description: report.description,
+          photoUrl: report.photoUrl,
+          location: report.location,
+          status: report.status,
+          upvoteCount: report.upvotes.length,
+          reportCount: report.reportCount,
+          priorityScore,
+          distanceMeters: Math.round(distance),
+          createdAt: report.createdAt,
+        }
+      })
+
+    res.status(200).json({
+      count: nearbyReports.length,
+      reports: nearbyReports,
+    })
+  } catch (error) {
+    console.error('Get nearby reports error:', error)
+    res.status(500).json({ message: 'Server error fetching nearby reports' })
   }
 }
