@@ -1,5 +1,25 @@
 import mongoose from 'mongoose'
 
+const commentSchema = new mongoose.Schema({
+  author: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+  },
+  authorRole: {
+    type: String,
+    required: true,
+  },
+  text: {
+    type: String,
+    required: true,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+})
+
 const reportSchema = new mongoose.Schema({
   ticketId: {
     type: String,
@@ -28,6 +48,9 @@ const reportSchema = new mongoose.Schema({
   photoUrl: {
     type: String,
   },
+  resolutionPhotoUrl: {
+    type: String,
+  },
   location: {
     lat: {
       type: Number,
@@ -40,7 +63,7 @@ const reportSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['reported', 'acknowledged', 'in_progress', 'resolved'],
+    enum: ['reported', 'acknowledged', 'in_progress', 'resolved', 'disputed'],
     default: 'reported',
   },
   isAnonymous: {
@@ -62,6 +85,24 @@ const reportSchema = new mongoose.Schema({
   priorityScore: {
     type: Number,
     default: 0,
+  },
+  comments: [commentSchema],
+  rating: {
+    score: {
+      type: Number,
+      min: 1,
+      max: 5,
+    },
+    feedback: {
+      type: String,
+    },
+  },
+  isDisputed: {
+    type: Boolean,
+    default: false,
+  },
+  disputeReason: {
+    type: String,
   },
 }, {
   timestamps: true,
