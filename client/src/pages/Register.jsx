@@ -2,36 +2,26 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import api from '../utils/api'
 
+const STEPS = ['Account Details', 'Location', 'Done']
+
 function Register() {
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    password: '',
-    phone: '',
-    state: '',
-    city: '',
+    name: '', email: '', password: '', phone: '', state: '', city: '',
   })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-
   const navigate = useNavigate()
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    })
+    setFormData({ ...formData, [e.target.name]: e.target.value })
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
-
     try {
-      const response = await api.post('/api/auth/register', formData)
-      
-      // Redirect to OTP verification page with email
+      await api.post('/api/auth/register', formData)
       navigate('/verify-otp', { state: { email: formData.email } })
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed. Please try again.')
@@ -41,105 +31,131 @@ function Register() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
-        <h1 className="text-3xl font-bold text-gray-800 mb-6 text-center">Sign Up</h1>
-        
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-        )}
+    <div className="min-h-screen bg-sandstone flex">
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-gray-700 mb-2">Name</label>
-            <input
-              type="text"
-              name="name"
-              value={formData.name}
-              onChange={handleChange}
-              required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+      {/* ── Left brand panel ─────────────────────────── */}
+      <div className="hidden lg:flex flex-col justify-between w-[42%] bg-sovereign-indigo text-white p-12">
+        <div>
+          <div className="flex items-center gap-3 mb-12">
+            <div className="w-10 h-10 rounded bg-kesariya flex items-center justify-center text-xl">🏛</div>
+            <span className="font-display font-bold text-2xl">Nivaran</span>
           </div>
+          <h2 className="font-display text-4xl font-bold leading-tight mb-4">
+            नागरिक बनें<br />
+            <span className="text-white/60 text-2xl font-medium">Become a Citizen</span>
+          </h2>
+          <p className="text-white/60 text-sm leading-relaxed max-w-xs">
+            Create your account and start reporting civic issues in your locality. It's free, fast, and matters.
+          </p>
+        </div>
 
-          <div>
-            <label className="block text-gray-700 mb-2">Email</label>
-            <input
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+        {/* Step indicators */}
+        <div className="space-y-4">
+          {STEPS.map((step, i) => (
+            <div key={step} className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-full border-2 border-kesariya/60 flex items-center justify-center text-xs font-bold text-white/80">
+                {i + 1}
+              </div>
+              <span className="text-sm text-white/60">{step}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
-          <div>
-            <label className="block text-gray-700 mb-2">Password</label>
-            <input
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              required
-              minLength="6"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+      {/* ── Right form panel ─────────────────────────── */}
+      <div className="flex-1 flex items-center justify-center p-6 sm:p-12 overflow-y-auto">
+        <div className="w-full max-w-md">
+          {/* Mobile brand */}
+          <div className="lg:hidden flex items-center gap-2.5 mb-8">
+            <div className="w-8 h-8 rounded bg-sovereign-indigo flex items-center justify-center text-white text-sm">🏛</div>
+            <span className="font-display font-bold text-sovereign-indigo text-xl">Nivaran</span>
           </div>
 
-          <div>
-            <label className="block text-gray-700 mb-2">Phone (+91XXXXXXXXXX)</label>
-            <input
-              type="tel"
-              name="phone"
-              value={formData.phone}
-              onChange={handleChange}
-              placeholder="+91XXXXXXXXXX"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          <h1 className="font-display text-3xl font-bold text-sovereign-indigo mb-1">
+            Create Account
+          </h1>
+          <p className="text-gray-500 text-sm mb-7">
+            Register as a citizen to report and track issues
+          </p>
 
-          <div>
-            <label className="block text-gray-700 mb-2">State</label>
-            <input
-              type="text"
-              name="state"
-              value={formData.state}
-              onChange={handleChange}
-              required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          {error && (
+            <div className="alert-error mb-5 flex items-start gap-2">
+              <span>⚠️</span>
+              <span>{error}</span>
+            </div>
+          )}
 
-          <div>
-            <label className="block text-gray-700 mb-2">City</label>
-            <input
-              type="text"
-              name="city"
-              value={formData.city}
-              onChange={handleChange}
-              required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Account details */}
+            <div className="card-nivaran p-4 space-y-4">
+              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Account Details</p>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400"
-          >
-            {loading ? 'Creating Account...' : 'Sign Up'}
-          </button>
-        </form>
+              <div>
+                <label htmlFor="name" className="label-nivaran">Full Name</label>
+                <input id="name" type="text" name="name" value={formData.name}
+                  onChange={handleChange} required placeholder="Ramesh Kumar"
+                  className="input-nivaran" />
+              </div>
 
-        <p className="text-center text-gray-600 mt-6">
-          Already have an account?{' '}
-          <Link to="/login" className="text-blue-600 hover:underline">
-            Login
-          </Link>
-        </p>
+              <div>
+                <label htmlFor="email" className="label-nivaran">Email</label>
+                <input id="email" type="email" name="email" value={formData.email}
+                  onChange={handleChange} required placeholder="you@example.com"
+                  className="input-nivaran" />
+              </div>
+
+              <div>
+                <label htmlFor="password" className="label-nivaran">Password</label>
+                <input id="password" type="password" name="password" value={formData.password}
+                  onChange={handleChange} required minLength="6" placeholder="Min. 6 characters"
+                  className="input-nivaran" />
+              </div>
+
+              <div>
+                <label htmlFor="phone" className="label-nivaran">Phone (optional)</label>
+                <input id="phone" type="tel" name="phone" value={formData.phone}
+                  onChange={handleChange} placeholder="+91XXXXXXXXXX"
+                  className="input-nivaran" />
+              </div>
+            </div>
+
+            {/* Location */}
+            <div className="card-nivaran p-4 space-y-4">
+              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Your Location</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="state" className="label-nivaran">State</label>
+                  <input id="state" type="text" name="state" value={formData.state}
+                    onChange={handleChange} required placeholder="Maharashtra"
+                    className="input-nivaran" />
+                </div>
+                <div>
+                  <label htmlFor="city" className="label-nivaran">City</label>
+                  <input id="city" type="text" name="city" value={formData.city}
+                    onChange={handleChange} required placeholder="Pune"
+                    className="input-nivaran" />
+                </div>
+              </div>
+            </div>
+
+            <button type="submit" disabled={loading} className="btn-primary w-full py-3">
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Creating Account…
+                </span>
+              ) : 'Create Account & Verify Email →'}
+            </button>
+          </form>
+
+          <p className="text-center text-gray-500 text-sm mt-6">
+            Already have an account?{' '}
+            <Link to="/login" className="text-kesariya font-semibold hover:text-civic-flame transition">
+              Login
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   )
