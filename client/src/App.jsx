@@ -9,6 +9,7 @@ import CitizenDashboard from './pages/citizen/CitizenDashboard'
 import ReportIssue from './pages/citizen/ReportIssue'
 import MyReports from './pages/citizen/MyReports'
 import ReportDetail from './pages/citizen/ReportDetail'
+import NearbyIssues from './pages/citizen/NearbyIssues'
 import StaffDashboard from './pages/staff/StaffDashboard'
 import AdminDashboard from './pages/admin/AdminDashboard'
 
@@ -52,6 +53,14 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['citizen']}>
                 <ReportDetail />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/citizen/nearby" 
+            element={
+              <ProtectedRoute allowedRoles={['citizen']}>
+                <NearbyIssues />
               </ProtectedRoute>
             } 
           />
