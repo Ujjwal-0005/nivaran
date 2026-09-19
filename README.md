@@ -80,7 +80,7 @@ flowchart TB
 
     subgraph External["External Free Services"]
         C1[(MongoDB Atlas)]
-        C2[Cloudinary - Image Storage]
+        C2[ImageKit - Image Storage]
         C3[Nodemailer - Email]
         C4[Leaflet + OpenStreetMap]
         C5[Gemini API - optional]
@@ -157,7 +157,7 @@ Zooms into the report-submission process, the current active build area.
 ```mermaid
 flowchart TB
     Citizen((Citizen)) --> S1[2.1 Capture Location - Geolocation API]
-    Citizen --> S2[2.2 Upload Photo - Cloudinary]
+    Citizen --> S2[2.2 Upload Photo - ImageKit]
     Citizen --> S3[2.3 Enter Category & Description]
     S1 --> S4[2.4 Check for Nearby Duplicates - Haversine]
     S2 --> S4
@@ -182,7 +182,7 @@ flowchart TB
 
 - Node.js (v18+)
 - MongoDB Atlas account
-- Cloudinary account
+- ImageKit account
 
 ### Setup
 
@@ -207,9 +207,9 @@ Create a `.env` file in `/server`:
 ```
 MONGO_URI=your_mongodb_atlas_uri
 JWT_SECRET=your_jwt_secret
-CLOUDINARY_CLOUD_NAME=your_cloudinary_name
-CLOUDINARY_API_KEY=your_key
-CLOUDINARY_API_SECRET=your_secret
+IMAGEKIT_PUBLIC_KEY=your_imagekit_public_key
+IMAGEKIT_PRIVATE_KEY=your_imagekit_private_key
+IMAGEKIT_URL_ENDPOINT=your_imagekit_url_endpoint
 EMAIL_USER=your_email
 EMAIL_PASS=your_app_password
 GEMINI_API_KEY=your_gemini_key   # added in later phase
