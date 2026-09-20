@@ -114,6 +114,17 @@ const reportSchema = new mongoose.Schema({
   resolutionNote: {
     type: String,
   },
+  // Phase 7: SLA and Escalation
+  slaDeadline: {
+    type: Date,
+  },
+  isEscalated: {
+    type: Boolean,
+    default: false,
+  },
+  escalatedAt: {
+    type: Date,
+  },
 }, {
   timestamps: true,
 })

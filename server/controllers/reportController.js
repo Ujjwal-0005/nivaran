@@ -17,7 +17,7 @@ export const submitReport = async (req, res) => {
   try {
     console.log('Submit report - req.body:', req.body)
     console.log('Submit report - req.file:', req.file)
-    
+
     const { category, description, lat, lng, isAnonymous, forceNew } = req.body
     const userId = req.user.userId
 
@@ -82,6 +82,36 @@ export const submitReport = async (req, res) => {
       return res.status(500).json({ message: 'Failed to generate unique ticket ID' })
     }
 
+    // Auto-assign to a staff member from the same department
+    // Load-balance by finding staff with fewest assigned reports
+    const User = (await import('../models/User.js')).default
+    const departmentStaff = await User.find({
+      role: 'staff',
+      department: categoryDoc.department._id,
+      isVerified: true,
+    })
+
+    let assignedStaffId = null
+    if (departmentStaff.length > 0) {
+      // Count assigned reports for each staff member
+      const staffWithCounts = await Promise.all(
+        departmentStaff.map(async (staff) => {
+          const count = await Report.countDocuments({ assignedTo: staff._id })
+          return { staff, count }
+        })
+      )
+      // Assign to staff with fewest reports
+      staffWithCounts.sort((a, b) => a.count - b.count)
+      assignedStaffId = staffWithCounts[0].staff._id
+      console.log(`Auto-assigned to staff: ${staffWithCounts[0].staff.name} (assigned: ${staffWithCounts[0].count})`)
+    } else {
+      console.log('No staff found for department, report will be unassigned')
+    }
+
+    // Calculate SLA deadline based on category SLA hours (default 48 hours)
+    const slaHours = categoryDoc.slaHours || 48
+    const slaDeadline = new Date(Date.now() + slaHours * 60 * 60 * 1000)
+
     // Create report
     const reportData = {
       ticketId,
@@ -92,6 +122,8 @@ export const submitReport = async (req, res) => {
       location: { lat: parseFloat(lat), lng: parseFloat(lng) },
       isAnonymous: isAnonymousBool,
       reportedBy: [userId],
+      assignedTo: assignedStaffId,
+      slaDeadline,
     }
 
     // Add photo URL if uploaded
@@ -300,6 +332,7 @@ export const getReportById = async (req, res) => {
       .populate('department')
       .populate('citizen', 'name email')
       .populate('reportedBy', 'name email')
+      .populate('assignedTo', 'name email department')
       .populate('comments.author', 'name role')
 
     if (!report) {
@@ -573,6 +606,44 @@ export const getAssignedReports = async (req, res) => {
   }
 }
 
+// Get all reports in staff's department (staff only)
+export const getDepartmentReports = async (req, res) => {
+  try {
+    const User = (await import('../models/User.js')).default
+    const staff = await User.findById(req.user.userId)
+    if (!staff || !staff.department) {
+      return res.status(400).json({ message: 'Staff must be assigned to a department' })
+    }
+
+    const reports = await Report.find({ department: staff.department })
+      .populate('category', 'name severityWeight')
+      .populate('department', 'name')
+      .populate('citizen', 'name email')
+      .populate('assignedTo', 'name email')
+      .sort({ priorityScore: -1 })
+
+    // Recalculate live priority scores before responding
+    const reportsWithPriority = reports.map(report => {
+      const daysOpen = calculateDaysOpen(report.createdAt)
+      const severityWeight = report.category?.severityWeight || 1
+      const priorityScore = calculatePriorityScore({
+        reportCount: report.reportCount,
+        severityWeight,
+        daysOpen,
+        upvotes: report.upvotes.length,
+      })
+      const obj = report.toObject()
+      obj.priorityScore = priorityScore
+      return obj
+    })
+
+    res.status(200).json({ reports: reportsWithPriority })
+  } catch (error) {
+    console.error('Get department reports error:', error)
+    res.status(500).json({ message: 'Server error fetching department reports' })
+  }
+}
+
 // Update report status (staff only, must be assigned to this report)
 // Supports: acknowledged → in_progress → resolved
 // Resolving requires resolutionNote + after-photo (resolutionPhotoUrl)
@@ -595,18 +666,20 @@ export const updateStatus = async (req, res) => {
       return res.status(404).json({ message: 'Report not found' })
     }
 
-    // Security: only the assigned staff member may update this ticket
-    if (!report.assignedTo || report.assignedTo.toString() !== staffId) {
+    // Security: staff must be in the same department as the report
+    const User = (await import('../models/User.js')).default
+    const staff = await User.findById(staffId)
+    if (!staff || !staff.department || staff.department.toString() !== report.department.toString()) {
       return res.status(403).json({
-        message: 'You are not assigned to this report and cannot update its status',
+        message: 'You are not in the same department as this report and cannot update its status',
       })
     }
 
     // Enforce valid forward-only transitions
     const TRANSITIONS = {
-      reported:     ['acknowledged'],
+      reported: ['acknowledged'],
       acknowledged: ['in_progress'],
-      in_progress:  ['resolved'],
+      in_progress: ['resolved'],
     }
     const allowedNext = TRANSITIONS[report.status] || []
     if (!allowedNext.includes(status)) {
@@ -680,3 +753,245 @@ export const updateStatus = async (req, res) => {
     res.status(500).json({ message: 'Server error updating report status' })
   }
 }
+
+// ── Phase 7: Admin Controllers ──────────────────────────────────────────────
+
+// GET /api/reports (admin only)
+// Supports filters: ?status=, ?department=, ?category=, ?escalated=true
+export const getAllReports = async (req, res) => {
+  try {
+    const { status, department, category, escalated } = req.query
+    const filter = {}
+
+    if (status) {
+      filter.status = status
+    }
+    if (department) {
+      filter.department = department
+    }
+    if (category) {
+      filter.category = category
+    }
+    if (escalated === 'true') {
+      filter.isEscalated = true
+    } else if (escalated === 'false') {
+      filter.isEscalated = false
+    }
+
+    const reports = await Report.find(filter)
+      .populate('category', 'name severityWeight slaHours')
+      .populate('department', 'name')
+      .populate('citizen', 'name email')
+      .populate('assignedTo', 'name email')
+      .sort({ priorityScore: -1, createdAt: -1 })
+
+    // Dynamically calculate and update daysOpen and priorityScore for up-to-date sorting
+    const enrichedReports = reports.map((r) => {
+      const daysOpen = calculateDaysOpen(r.createdAt)
+      const severityWeight = r.category?.severityWeight || 1
+      let calculatedPriority = calculatePriorityScore({
+        reportCount: r.reportCount,
+        severityWeight,
+        daysOpen,
+        upvotes: r.upvotes?.length || 0,
+      })
+      if (r.isEscalated) {
+        calculatedPriority += 50
+      }
+      return {
+        ...r.toObject(),
+        priorityScore: calculatedPriority,
+        daysOpen,
+      }
+    })
+
+    res.status(200).json({ reports: enrichedReports })
+  } catch (error) {
+    console.error('Get all reports error:', error)
+    res.status(500).json({ message: 'Server error fetching reports' })
+  }
+}
+
+// PATCH /api/reports/:id/assign (admin only)
+// Body: { staffId } OR auto-assign least-loaded staff in department
+export const assignReport = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { staffId } = req.body
+
+    const report = await Report.findById(id).populate('category department')
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    const User = (await import('../models/User.js')).default
+    let targetStaff = null
+
+    if (staffId) {
+      // Manual assignment
+      targetStaff = await User.findOne({
+        _id: staffId,
+        role: 'staff',
+        isVerified: true,
+      })
+      if (!targetStaff) {
+        return res.status(404).json({ message: 'Selected staff member not found or invalid' })
+      }
+    } else {
+      // Auto-assign using load balancing:
+      // Find staff in the report's department with fewest open assigned tickets
+      const deptId = report.department?._id || report.department
+      const deptStaff = await User.find({
+        role: 'staff',
+        department: deptId,
+        isVerified: true,
+      })
+
+      if (!deptStaff || deptStaff.length === 0) {
+        return res.status(400).json({
+          message: 'No verified staff members found in this department for auto-assignment',
+        })
+      }
+
+      // Count open assigned tickets for each staff member
+      const staffWorkloads = await Promise.all(
+        deptStaff.map(async (staff) => {
+          const openCount = await Report.countDocuments({
+            assignedTo: staff._id,
+            status: { $ne: 'resolved' },
+          })
+          return { staff, count: openCount }
+        })
+      )
+
+      staffWorkloads.sort((a, b) => a.count - b.count)
+      targetStaff = staffWorkloads[0].staff
+    }
+
+    report.assignedTo = targetStaff._id
+    // Update status to 'acknowledged' if it was 'reported'
+    if (report.status === 'reported') {
+      report.status = 'acknowledged'
+    }
+
+    await report.save()
+
+    const populated = await Report.findById(id)
+      .populate('category', 'name severityWeight slaHours')
+      .populate('department', 'name')
+      .populate('assignedTo', 'name email')
+
+    res.status(200).json({
+      message: `Ticket successfully assigned to ${targetStaff.name}`,
+      report: populated,
+    })
+  } catch (error) {
+    console.error('Assign report error:', error)
+    res.status(500).json({ message: 'Server error assigning report' })
+  }
+}
+
+// GET /api/reports/disputed (admin only)
+export const getDisputedReports = async (req, res) => {
+  try {
+    const disputedReports = await Report.find({ status: 'disputed' })
+      .populate('category', 'name severityWeight slaHours')
+      .populate('department', 'name')
+      .populate('citizen', 'name email')
+      .populate('assignedTo', 'name email')
+      .sort({ updatedAt: -1 })
+
+    res.status(200).json({ reports: disputedReports })
+  } catch (error) {
+    console.error('Get disputed reports error:', error)
+    res.status(500).json({ message: 'Server error fetching disputed reports' })
+  }
+}
+
+// PATCH /api/reports/:id/resolve-dispute (admin only)
+// Body: { action: 'reassign' | 'mark_resolved' | 'escalate_further', note, staffId }
+export const resolveDispute = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { action, note, staffId } = req.body
+    const adminUser = req.user
+
+    if (!action || !['reassign', 'mark_resolved', 'escalate_further'].includes(action)) {
+      return res.status(400).json({
+        message: "Invalid action. Must be 'reassign', 'mark_resolved', or 'escalate_further'",
+      })
+    }
+
+    const report = await Report.findById(id).populate('category department')
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    if (report.status !== 'disputed' && !report.isDisputed) {
+      return res.status(400).json({ message: 'Report is not currently marked as disputed' })
+    }
+
+    const User = (await import('../models/User.js')).default
+
+    if (action === 'reassign') {
+      // Reopen ticket to in_progress
+      report.status = 'in_progress'
+      report.isDisputed = false
+
+      if (staffId) {
+        const staffExists = await User.findById(staffId)
+        if (staffExists) {
+          report.assignedTo = staffId
+        }
+      }
+
+      // Add audit comment
+      report.comments.push({
+        author: adminUser.userId,
+        authorRole: 'admin',
+        text: `[Admin Dispute Resolution: Reopened] ${note || 'Issue reopened for further work.'}`,
+        createdAt: new Date(),
+      })
+    } else if (action === 'mark_resolved') {
+      // Admin overrides citizen dispute and confirms resolved
+      report.status = 'resolved'
+      report.isDisputed = false
+
+      report.comments.push({
+        author: adminUser.userId,
+        authorRole: 'admin',
+        text: `[Admin Dispute Resolution: Confirmed Resolved] ${note || 'Admin reviewed dispute and confirmed resolution.'}`,
+        createdAt: new Date(),
+      })
+    } else if (action === 'escalate_further') {
+      // Remains disputed, flagged for higher municipal review
+      report.isEscalated = true
+      report.escalatedAt = new Date()
+
+      report.comments.push({
+        author: adminUser.userId,
+        authorRole: 'admin',
+        text: `[Admin Dispute Resolution: Escalated Further] Flagged for executive/higher review. ${note || ''}`.trim(),
+        createdAt: new Date(),
+      })
+    }
+
+    await report.save()
+
+    const updated = await Report.findById(id)
+      .populate('category', 'name severityWeight slaHours')
+      .populate('department', 'name')
+      .populate('citizen', 'name email')
+      .populate('assignedTo', 'name email')
+      .populate('comments.author', 'name role')
+
+    res.status(200).json({
+      message: `Dispute action '${action}' processed successfully`,
+      report: updated,
+    })
+  } catch (error) {
+    console.error('Resolve dispute error:', error)
+    res.status(500).json({ message: 'Server error processing dispute resolution' })
+  }
+}
+
