@@ -11,6 +11,7 @@ import MyReports from './pages/citizen/MyReports'
 import ReportDetail from './pages/citizen/ReportDetail'
 import NearbyIssues from './pages/citizen/NearbyIssues'
 import StaffDashboard from './pages/staff/StaffDashboard'
+import StaffTicketDetail from './pages/staff/StaffTicketDetail'
 import AdminDashboard from './pages/admin/AdminDashboard'
 
 function App() {
@@ -69,6 +70,14 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['staff']}>
                 <StaffDashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/staff/tickets/:id" 
+            element={
+              <ProtectedRoute allowedRoles={['staff']}>
+                <StaffTicketDetail />
               </ProtectedRoute>
             } 
           />
