@@ -534,3 +534,149 @@ export const getNearbyReports = async (req, res) => {
     res.status(500).json({ message: 'Server error fetching nearby reports' })
   }
 }
+
+// ─────────────────────────────────────────────
+// Phase 6 — Staff endpoints
+// ─────────────────────────────────────────────
+
+// Get staff's assigned tickets sorted by priority (staff only)
+export const getAssignedReports = async (req, res) => {
+  try {
+    const staffId = req.user.userId
+
+    const reports = await Report.find({ assignedTo: staffId })
+      .populate('category', 'name severityWeight')
+      .populate('department', 'name')
+      .populate('citizen', 'name email')
+      .populate('assignedTo', 'name email')
+      .sort({ priorityScore: -1 })
+
+    // Recalculate live priority scores before responding
+    const reportsWithPriority = reports.map(report => {
+      const daysOpen = calculateDaysOpen(report.createdAt)
+      const severityWeight = report.category?.severityWeight || 1
+      const priorityScore = calculatePriorityScore({
+        reportCount: report.reportCount,
+        severityWeight,
+        daysOpen,
+        upvotes: report.upvotes.length,
+      })
+      const obj = report.toObject()
+      obj.priorityScore = priorityScore
+      return obj
+    })
+
+    res.status(200).json({ reports: reportsWithPriority })
+  } catch (error) {
+    console.error('Get assigned reports error:', error)
+    res.status(500).json({ message: 'Server error fetching assigned reports' })
+  }
+}
+
+// Update report status (staff only, must be assigned to this report)
+// Supports: acknowledged → in_progress → resolved
+// Resolving requires resolutionNote + after-photo (resolutionPhotoUrl)
+export const updateStatus = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { status, resolutionNote } = req.body
+    const staffId = req.user.userId
+
+    // Valid statuses staff can set
+    const ALLOWED_STATUSES = ['acknowledged', 'in_progress', 'resolved']
+    if (!ALLOWED_STATUSES.includes(status)) {
+      return res.status(400).json({
+        message: `Invalid status. Staff can only set: ${ALLOWED_STATUSES.join(', ')}`,
+      })
+    }
+
+    const report = await Report.findById(id).populate('category', 'severityWeight')
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    // Security: only the assigned staff member may update this ticket
+    if (!report.assignedTo || report.assignedTo.toString() !== staffId) {
+      return res.status(403).json({
+        message: 'You are not assigned to this report and cannot update its status',
+      })
+    }
+
+    // Enforce valid forward-only transitions
+    const TRANSITIONS = {
+      reported:     ['acknowledged'],
+      acknowledged: ['in_progress'],
+      in_progress:  ['resolved'],
+    }
+    const allowedNext = TRANSITIONS[report.status] || []
+    if (!allowedNext.includes(status)) {
+      return res.status(400).json({
+        message: `Cannot transition from '${report.status}' to '${status}'. Allowed next status: ${allowedNext.join(', ') || 'none'}`,
+      })
+    }
+
+    // Resolving requires an after-photo and a resolution note
+    if (status === 'resolved') {
+      if (!resolutionNote || !resolutionNote.trim()) {
+        return res.status(400).json({ message: 'A resolution note is required when marking a report as resolved' })
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: 'An after-photo is required when marking a report as resolved' })
+      }
+
+      // Upload after-photo to ImageKit
+      try {
+        const file = await toFile(req.file.buffer, req.file.originalname, {
+          type: req.file.mimetype,
+        })
+        const uploadResponse = await imagekit.files.upload({
+          file,
+          fileName: `resolution-${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`,
+          useUniqueFileName: true,
+          folder: '/nivaran/resolutions',
+        })
+        if (!uploadResponse || !uploadResponse.url) {
+          throw new Error('ImageKit upload did not return a URL')
+        }
+        report.resolutionPhotoUrl = uploadResponse.url
+      } catch (uploadError) {
+        console.error('Resolution photo upload error:', uploadError)
+        return res.status(500).json({ message: 'Failed to upload resolution photo' })
+      }
+
+      report.resolutionNote = resolutionNote.trim()
+    }
+
+    report.status = status
+
+    // Recalculate priority score after status change
+    const daysOpen = calculateDaysOpen(report.createdAt)
+    const severityWeight = report.category?.severityWeight || 1
+    report.priorityScore = calculatePriorityScore({
+      reportCount: report.reportCount,
+      severityWeight,
+      daysOpen,
+      upvotes: report.upvotes.length,
+    })
+
+    await report.save()
+
+    // TODO: Phase 8 — trigger real-time + email notification to reporters here
+
+    res.status(200).json({
+      message: `Report status updated to '${status}'`,
+      report: {
+        id: report._id,
+        ticketId: report.ticketId,
+        status: report.status,
+        resolutionPhotoUrl: report.resolutionPhotoUrl,
+        resolutionNote: report.resolutionNote,
+        priorityScore: report.priorityScore,
+      },
+    })
+  } catch (error) {
+    console.error('Update status error:', error)
+    res.status(500).json({ message: 'Server error updating report status' })
+  }
+}

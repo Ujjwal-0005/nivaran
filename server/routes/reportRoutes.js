@@ -9,6 +9,8 @@ import {
   rateReport,
   disputeReport,
   getNearbyReports,
+  getAssignedReports,
+  updateStatus,
 } from '../controllers/reportController.js'
 import { auth } from '../middleware/auth.js'
 import { roleCheck } from '../middleware/roleCheck.js'
@@ -16,12 +18,19 @@ import upload from '../middleware/upload.js'
 
 const router = express.Router()
 
-// IMPORTANT: /nearby must come before /:id to prevent Express treating "nearby" as an ID
+// ── Ordering note ─────────────────────────────────────────────────────────────
+// Static path segments (/nearby, /mine, /assigned) MUST come before /:id
+// to prevent Express from treating them as MongoDB ObjectId params.
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Get nearby open reports (any logged-in user)
 router.get('/nearby', auth, getNearbyReports)
 
 // Get citizen's own reports (citizen only)
 router.get('/mine', auth, roleCheck('citizen'), getMyReports)
+
+// Phase 6: Get staff's assigned tickets (staff only)
+router.get('/assigned', auth, roleCheck('staff'), getAssignedReports)
 
 // Submit a new report (citizen only)
 router.post(
@@ -46,6 +55,16 @@ router.post('/:id/rate', auth, roleCheck('citizen'), rateReport)
 
 // Dispute a resolved report (citizen only)
 router.post('/:id/dispute', auth, roleCheck('citizen'), disputeReport)
+
+// Phase 6: Update report status (staff only, must be assigned)
+// Uses upload middleware — for resolved status an after-photo is required
+router.patch(
+  '/:id/status',
+  auth,
+  roleCheck('staff'),
+  upload.single('resolutionPhoto'),
+  updateStatus
+)
 
 // Get single report by ID (any logged-in user)
 router.get('/:id', auth, getReportById)

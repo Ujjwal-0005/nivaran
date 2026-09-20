@@ -104,6 +104,16 @@ const reportSchema = new mongoose.Schema({
   disputeReason: {
     type: String,
   },
+  // Phase 6: staff assignment — set by Admin (Phase 7)
+  assignedTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
+  // Phase 6: note staff adds when marking resolved
+  resolutionNote: {
+    type: String,
+  },
 }, {
   timestamps: true,
 })
