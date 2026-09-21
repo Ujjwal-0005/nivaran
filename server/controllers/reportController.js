@@ -1,5 +1,6 @@
 import Report from '../models/Report.js'
 import Category from '../models/Category.js'
+import User from '../models/User.js'
 import { checkForDuplicate } from '../algorithms/duplicateDetection.js'
 import { calculatePriorityScore, calculateDaysOpen } from '../algorithms/priorityScoring.js'
 import imagekit from '../config/imagekit.js'
@@ -84,7 +85,6 @@ export const submitReport = async (req, res) => {
 
     // Auto-assign to a staff member from the same department
     // Load-balance by finding staff with fewest assigned reports
-    const User = (await import('../models/User.js')).default
     const departmentStaff = await User.find({
       role: 'staff',
       department: categoryDoc.department._id,
@@ -387,8 +387,41 @@ export const addComment = async (req, res) => {
     await report.save()
 
     // Re-fetch with populated author for the response
-    const updatedReport = await Report.findById(id).populate('comments.author', 'name role')
+    const updatedReport = await Report.findById(id)
+      .populate('category', 'name')
+      .populate('comments.author', 'name role')
     const newComment = updatedReport.comments[updatedReport.comments.length - 1]
+
+    // Phase 8: Notification routing for new comment
+    const { notifyUser, notifyAdmins } = await import('../utils/notify.js')
+    const commentPayload = {
+      reportId: report._id,
+      ticketId: report.ticketId,
+      category: updatedReport.category?.name || 'Civic Issue',
+      comment: newComment,
+      authorRole: userRole,
+      authorName: req.user.name || 'User',
+      message: `New comment on ${report.ticketId} by ${req.user.name || userRole}: "${text.trim().substring(0, 60)}${text.trim().length > 60 ? '...' : ''}"`,
+    }
+
+    if (userRole === 'citizen') {
+      // Citizen commented -> notify assigned staff if any, and notify admins
+      if (report.assignedTo) {
+        notifyUser(report.assignedTo, 'new_comment', commentPayload)
+      }
+      notifyAdmins('new_comment', commentPayload)
+    } else {
+      // Staff or Admin commented -> notify all citizen reporters
+      const reporterIds = (report.reportedBy || []).map((u) => u.toString())
+      if (report.citizen && !reporterIds.includes(report.citizen.toString())) {
+        reporterIds.push(report.citizen.toString())
+      }
+      for (const repId of reporterIds) {
+        if (repId !== userId) {
+          notifyUser(repId, 'new_comment', commentPayload)
+        }
+      }
+    }
 
     res.status(201).json({
       message: 'Comment added successfully',
@@ -609,7 +642,6 @@ export const getAssignedReports = async (req, res) => {
 // Get all reports in staff's department (staff only)
 export const getDepartmentReports = async (req, res) => {
   try {
-    const User = (await import('../models/User.js')).default
     const staff = await User.findById(req.user.userId)
     if (!staff || !staff.department) {
       return res.status(400).json({ message: 'Staff must be assigned to a department' })
@@ -667,7 +699,6 @@ export const updateStatus = async (req, res) => {
     }
 
     // Security: staff must be in the same department as the report
-    const User = (await import('../models/User.js')).default
     const staff = await User.findById(staffId)
     if (!staff || !staff.department || staff.department.toString() !== report.department.toString()) {
       return res.status(403).json({
@@ -735,7 +766,55 @@ export const updateStatus = async (req, res) => {
 
     await report.save()
 
-    // TODO: Phase 8 — trigger real-time + email notification to reporters here
+    // Phase 8: Real-time and Email Notifications to all citizens who reported this ticket
+    const { notifyUser } = await import('../utils/notify.js')
+    const { sendStatusUpdateEmail, sendResolvedEmail } = await import('../utils/sendEmail.js')
+
+    // Aggregate all unique reporters
+    const reporterUserIds = (report.reportedBy || []).map((u) => u.toString())
+    if (report.citizen && !reporterUserIds.includes(report.citizen.toString())) {
+      reporterUserIds.push(report.citizen.toString())
+    }
+
+    const populatedReport = await Report.findById(id).populate('category', 'name')
+    const categoryName = populatedReport.category?.name || 'Civic Issue'
+
+    const statusPayload = {
+      reportId: report._id,
+      ticketId: report.ticketId,
+      status: report.status,
+      category: categoryName,
+      resolutionNote: report.resolutionNote || null,
+      resolutionPhotoUrl: report.resolutionPhotoUrl || null,
+      message: `Status update: Report ${report.ticketId} is now ${status.toUpperCase().replace('_', ' ')}`,
+    }
+
+    // Fetch user details to get email addresses
+    const reporterDocs = await User.find({ _id: { $in: reporterUserIds } }).select('email name')
+
+    for (const reporter of reporterDocs) {
+      // 1. Emit Socket.io real-time event to user room
+      notifyUser(reporter._id, 'status_update', statusPayload)
+
+      // 2. Send email notification fallback
+      if (reporter.email) {
+        if (status === 'resolved') {
+          sendResolvedEmail(reporter.email, {
+            ticketId: report.ticketId,
+            category: categoryName,
+            resolutionNote: report.resolutionNote,
+            reportId: report._id,
+          }).catch((err) => console.error('Error sending resolve email:', err.message))
+        } else {
+          sendStatusUpdateEmail(reporter.email, {
+            ticketId: report.ticketId,
+            status: report.status,
+            category: categoryName,
+            resolutionNote: report.resolutionNote,
+          }).catch((err) => console.error('Error sending status email:', err.message))
+        }
+      }
+    }
 
     res.status(200).json({
       message: `Report status updated to '${status}'`,
@@ -824,7 +903,6 @@ export const assignReport = async (req, res) => {
       return res.status(404).json({ message: 'Report not found' })
     }
 
-    const User = (await import('../models/User.js')).default
     let targetStaff = null
 
     if (staffId) {
@@ -881,6 +959,19 @@ export const assignReport = async (req, res) => {
       .populate('department', 'name')
       .populate('assignedTo', 'name email')
 
+    // Phase 8: Real-time notification to assigned staff member
+    const { notifyUser } = await import('../utils/notify.js')
+    notifyUser(targetStaff._id, 'new_assignment', {
+      reportId: populated._id,
+      ticketId: populated.ticketId,
+      category: populated.category?.name || 'Civic Issue',
+      department: populated.department?.name || 'Department',
+      priorityScore: populated.priorityScore,
+      slaDeadline: populated.slaDeadline,
+      status: populated.status,
+      message: `📋 New ticket assigned to you: ${populated.ticketId} (${populated.category?.name || 'Issue'})`,
+    })
+
     res.status(200).json({
       message: `Ticket successfully assigned to ${targetStaff.name}`,
       report: populated,
@@ -931,7 +1022,6 @@ export const resolveDispute = async (req, res) => {
       return res.status(400).json({ message: 'Report is not currently marked as disputed' })
     }
 
-    const User = (await import('../models/User.js')).default
 
     if (action === 'reassign') {
       // Reopen ticket to in_progress
