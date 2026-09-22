@@ -17,6 +17,12 @@ const categorySchema = new mongoose.Schema({
     min: 1,
     max: 10,
   },
+  slaHours: {
+    type: Number,
+    required: true,
+    default: 48,
+    min: 1,
+  },
 }, {
   timestamps: true,
 })
