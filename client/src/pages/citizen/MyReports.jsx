@@ -1,17 +1,39 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api'
+import { useSocket } from '../../context/SocketContext'
 
 function MyReports() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const { socket } = useSocket()
 
   const navigate = useNavigate()
 
   useEffect(() => {
     fetchMyReports()
   }, [])
+
+  // Phase 8: Listen for live status updates and patch matching report state
+  useEffect(() => {
+    if (!socket) return
+
+    const handleStatusUpdate = (data) => {
+      setReports((prev) =>
+        prev.map((r) =>
+          r._id === data.reportId
+            ? { ...r, status: data.status, resolutionNote: data.resolutionNote || r.resolutionNote }
+            : r
+        )
+      )
+    }
+
+    socket.on('status_update', handleStatusUpdate)
+    return () => {
+      socket.off('status_update', handleStatusUpdate)
+    }
+  }, [socket])
 
   const fetchMyReports = async () => {
     try {

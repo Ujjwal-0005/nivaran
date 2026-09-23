@@ -8,6 +8,7 @@ import iconShadow from 'leaflet/dist/images/marker-shadow.png'
 import api from '../../utils/api'
 import StatusBadge from '../../components/StatusBadge'
 import { useAuth } from '../../context/AuthContext'
+import { useSocket } from '../../context/SocketContext'
 
 // Fix Leaflet default icon issue with Vite
 L.Icon.Default.mergeOptions({
@@ -44,6 +45,7 @@ function roleLabel(role) {
 function ReportDetail() {
   const { id } = useParams()
   const { user } = useAuth()
+  const { socket } = useSocket()
   const navigate = useNavigate()
 
   const [report, setReport] = useState(null)
@@ -71,6 +73,49 @@ function ReportDetail() {
   useEffect(() => {
     fetchReport()
   }, [id])
+
+  // Phase 8: Listen for live updates to this report
+  useEffect(() => {
+    if (!socket) return
+
+    const handleStatusUpdate = (data) => {
+      if (data.reportId === id) {
+        setReport((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: data.status,
+                resolutionNote: data.resolutionNote || prev.resolutionNote,
+                resolutionPhotoUrl: data.resolutionPhotoUrl || prev.resolutionPhotoUrl,
+              }
+            : prev
+        )
+      }
+    }
+
+    const handleNewComment = (data) => {
+      if (data.reportId === id && data.comment) {
+        setReport((prev) => {
+          if (!prev) return prev
+          // Avoid duplicate comments
+          const exists = prev.comments?.some((c) => c._id === data.comment._id)
+          if (exists) return prev
+          return {
+            ...prev,
+            comments: [...(prev.comments || []), data.comment],
+          }
+        })
+      }
+    }
+
+    socket.on('status_update', handleStatusUpdate)
+    socket.on('new_comment', handleNewComment)
+
+    return () => {
+      socket.off('status_update', handleStatusUpdate)
+      socket.off('new_comment', handleNewComment)
+    }
+  }, [socket, id])
 
   const fetchReport = async () => {
     try {

@@ -1,6 +1,8 @@
 import { useAuth } from '../../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 
+import NotificationBell from '../../components/NotificationBell'
+
 function CitizenDashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -42,12 +44,17 @@ function CitizenDashboard() {
             <h1 className="text-3xl font-bold text-gray-800">Citizen Dashboard</h1>
             <p className="text-gray-500 mt-1">Welcome back, {user?.name}</p>
           </div>
-          <button
-            onClick={handleLogout}
-            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition text-sm"
-          >
-            Logout
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="bg-gray-900 text-white rounded-xl flex items-center justify-center">
+              <NotificationBell />
+            </div>
+            <button
+              onClick={handleLogout}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition text-sm font-semibold"
+            >
+              Logout
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-5 md:grid-cols-3">

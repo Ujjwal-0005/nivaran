@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { useSocket } from '../../context/SocketContext'
 import api from '../../utils/api'
 import StatusBadge from '../../components/StatusBadge'
+import NotificationBell from '../../components/NotificationBell'
 
 // Priority dot with colour and score label
 function PriorityIndicator({ score }) {
@@ -55,6 +57,7 @@ const STATUS_TABS = [
 
 function StaffDashboard() {
   const { user, logout } = useAuth()
+  const { socket } = useSocket()
   const navigate = useNavigate()
 
   const [reports, setReports] = useState([])
@@ -66,14 +69,28 @@ function StaffDashboard() {
     fetchAssigned()
   }, [])
 
+  // Phase 8: Listen for live new assignment events to update staff dashboard
+  useEffect(() => {
+    if (!socket) return
+
+    const handleNewAssignment = () => {
+      fetchAssigned()
+    }
+
+    socket.on('new_assignment', handleNewAssignment)
+    return () => {
+      socket.off('new_assignment', handleNewAssignment)
+    }
+  }, [socket])
+
   const fetchAssigned = async () => {
     try {
       setLoading(true)
       setError('')
-      const res = await api.get('/api/reports/assigned')
+      const res = await api.get('/api/reports/department')
       setReports(res.data.reports)
     } catch (err) {
-      setError('Failed to load assigned tickets')
+      setError('Failed to load department tickets')
     } finally {
       setLoading(false)
     }
@@ -122,12 +139,15 @@ function StaffDashboard() {
           <p className="text-xs text-gray-400 uppercase tracking-widest">Nivaran Staff</p>
           <h1 className="text-lg font-semibold leading-tight">{user?.name}</h1>
         </div>
-        <button
-          onClick={handleLogout}
-          className="text-xs text-gray-400 hover:text-white transition border border-gray-700 px-3 py-1.5 rounded"
-        >
-          Logout
-        </button>
+        <div className="flex items-center gap-2">
+          <NotificationBell />
+          <button
+            onClick={handleLogout}
+            className="text-xs text-gray-400 hover:text-white transition border border-gray-700 px-3 py-1.5 rounded"
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
       <main className="max-w-xl mx-auto px-4 py-5">
