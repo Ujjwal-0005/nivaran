@@ -41,7 +41,31 @@ export const checkSlaEscalations = async () => {
 
       console.log(`[SLA Escalation] Escalated ticket ${report.ticketId} (Category: ${report.category?.name || 'N/A'}, New Priority: ${report.priorityScore})`)
 
-      // TODO: Phase 8 — notify admin when a ticket auto-escalates
+      // Phase 8: Real-time notification to municipal administrators
+      const { notifyAdmins } = await import('../utils/notify.js')
+      await notifyAdmins('ticket_escalated', {
+        id: report._id,
+        ticketId: report.ticketId,
+        category: report.category?.name || 'Civic Issue',
+        priorityScore: report.priorityScore,
+        slaDeadline: report.slaDeadline,
+        escalatedAt: report.escalatedAt,
+        message: `🚨 Ticket ${report.ticketId} has breached its SLA and auto-escalated (+50 Priority)`,
+      })
+
+      // Optional admin email notification fallback
+      const User = (await import('../models/User.js')).default
+      const admins = await User.find({ role: 'admin' }).select('email')
+      const { sendEscalationEmail } = await import('../utils/sendEmail.js')
+      for (const admin of admins) {
+        if (admin.email) {
+          sendEscalationEmail(admin.email, {
+            ticketId: report.ticketId,
+            category: report.category?.name || 'Civic Issue',
+            priorityScore: report.priorityScore,
+          }).catch(() => {})
+        }
+      }
     }
   } catch (error) {
     console.error('[SLA Escalation] Error checking SLA escalations:', error)
