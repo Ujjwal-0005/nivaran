@@ -750,6 +750,9 @@ export const updateStatus = async (req, res) => {
       }
 
       report.resolutionNote = resolutionNote.trim()
+      report.resolvedAt = new Date()
+    } else {
+      report.resolvedAt = null
     }
 
     report.status = status
@@ -1027,6 +1030,7 @@ export const resolveDispute = async (req, res) => {
       // Reopen ticket to in_progress
       report.status = 'in_progress'
       report.isDisputed = false
+      report.resolvedAt = null
 
       if (staffId) {
         const staffExists = await User.findById(staffId)
@@ -1046,6 +1050,9 @@ export const resolveDispute = async (req, res) => {
       // Admin overrides citizen dispute and confirms resolved
       report.status = 'resolved'
       report.isDisputed = false
+      if (!report.resolvedAt) {
+        report.resolvedAt = new Date()
+      }
 
       report.comments.push({
         author: adminUser.userId,

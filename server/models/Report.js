@@ -125,6 +125,10 @@ const reportSchema = new mongoose.Schema({
   escalatedAt: {
     type: Date,
   },
+  // Phase 9: Resolution timestamp for analytics
+  resolvedAt: {
+    type: Date,
+  },
 }, {
   timestamps: true,
 })
