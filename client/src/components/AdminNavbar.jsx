@@ -13,6 +13,7 @@ function AdminNavbar() {
 
   const navItems = [
     { name: 'Dashboard', path: '/admin', end: true },
+    { name: 'Analytics', path: '/admin/analytics' },
     { name: 'Live Map', path: '/admin/map' },
     { name: 'All Tickets', path: '/admin/tickets' },
     { name: 'Disputes', path: '/admin/disputes' },
