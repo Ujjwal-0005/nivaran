@@ -9,6 +9,8 @@ import reportRoutes from './routes/reportRoutes.js'
 import categoryRoutes from './routes/categoryRoutes.js'
 import staffRoutes from './routes/staffRoutes.js'
 import departmentRoutes from './routes/departmentRoutes.js'
+import analyticsRoutes from './routes/analyticsRoutes.js'
+import publicRoutes from './routes/publicRoutes.js'
 import { initSlaCron } from './services/slaCron.js'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -40,6 +42,8 @@ app.use('/api/reports', reportRoutes)
 app.use('/api/categories', categoryRoutes)
 app.use('/api/staff', staffRoutes)
 app.use('/api/departments', departmentRoutes)
+app.use('/api/analytics', analyticsRoutes)
+app.use('/api/public', publicRoutes)
 
 // Health check route
 app.get('/api/health', (req, res) => {
