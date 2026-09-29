@@ -21,6 +21,8 @@ import AdminTicketDetail from './pages/admin/AdminTicketDetail'
 import AdminStaff from './pages/admin/AdminStaff'
 import AdminDepartments from './pages/admin/AdminDepartments'
 import AdminDisputes from './pages/admin/AdminDisputes'
+import AdminAnalytics from './pages/admin/AdminAnalytics'
+import PublicTransparency from './pages/PublicTransparency'
 
 function App() {
   return (
@@ -30,6 +32,7 @@ function App() {
           <NotificationBanner />
           <Routes>
             <Route path="/" element={<Landing />} />
+            <Route path="/transparency" element={<PublicTransparency />} />
             <Route path="/register" element={<Register />} />
             <Route path="/login" element={<Login />} />
             <Route path="/verify-otp" element={<VerifyOTP />} />
@@ -96,6 +99,14 @@ function App() {
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/admin/analytics" 
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminAnalytics />
                 </ProtectedRoute>
               } 
             />
