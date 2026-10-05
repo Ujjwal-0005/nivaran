@@ -7,17 +7,22 @@ import icon from 'leaflet/dist/images/marker-icon.png'
 import iconShadow from 'leaflet/dist/images/marker-shadow.png'
 import api from '../../utils/api'
 import StatusBadge from '../../components/StatusBadge'
-import { useAuth } from '../../context/AuthContext'
+import StaffNavbar from '../../components/StaffNavbar'
+import { getDeptColor } from '../../utils/deptColors'
 
-// Fix Leaflet default icon
 L.Icon.Default.mergeOptions({ iconUrl: icon, shadowUrl: iconShadow })
 
-// Role label for comments
 function roleLabel(role) {
   return role === 'staff' ? 'Staff' : role === 'admin' ? 'Admin' : 'Citizen'
 }
 
-// ── Resolve Form ──────────────────────────────────────────────────────────────
+function roleBadgeClass(role) {
+  if (role === 'staff') return 'bg-blue-50 text-blue-700 border border-blue-200'
+  if (role === 'admin') return 'bg-violet-50 text-violet-700 border border-violet-200'
+  return 'bg-gray-50 text-gray-600 border border-earthen-slate'
+}
+
+// ── Resolve Form ───────────────────────────────────────
 function ResolveForm({ reportId, onSuccess }) {
   const [note, setNote] = useState('')
   const [photo, setPhoto] = useState(null)
@@ -27,94 +32,74 @@ function ResolveForm({ reportId, onSuccess }) {
 
   const handlePhoto = (e) => {
     const file = e.target.files[0]
-    if (file) {
-      setPhoto(file)
-      setPhotoPreview(URL.createObjectURL(file))
-    }
+    if (file) { setPhoto(file); setPhotoPreview(URL.createObjectURL(file)) }
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!note.trim()) { setError('Please provide a resolution note'); return }
     if (!photo) { setError('An after-photo is required to mark this resolved'); return }
-
     const formData = new FormData()
     formData.append('status', 'resolved')
     formData.append('resolutionNote', note)
     formData.append('resolutionPhoto', photo)
-
-    setSubmitting(true)
-    setError('')
+    setSubmitting(true); setError('')
     try {
-      await api.patch(`/api/reports/${reportId}/status`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      await api.patch(`/api/reports/${reportId}/status`, formData, { headers: { 'Content-Type': 'multipart/form-data' } })
       onSuccess()
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to mark resolved')
-    } finally {
-      setSubmitting(false)
-    }
+    } finally { setSubmitting(false) }
   }
 
   return (
-    <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-      <h3 className="font-semibold text-green-800 mb-3">Mark as Resolved</h3>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {/* After photo */}
+    <div className="card-nivaran p-5 border-jan-kalyan-green/40" style={{ borderColor: '#00875A50' }}>
+      <p className="text-xs font-bold uppercase tracking-widest text-jan-kalyan-green mb-3">Mark as Resolved</p>
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            After-Photo <span className="text-red-500">*</span>
+          <label className="label-nivaran">After-Photo <span className="text-terracotta-alert">*</span></label>
+          <label
+            htmlFor="resolve-photo"
+            className="flex flex-col items-center border-2 border-dashed border-earthen-slate rounded cursor-pointer hover:border-jan-kalyan-green hover:bg-jan-kalyan-green/5 transition p-4 text-center"
+          >
+            {photoPreview ? (
+              <img src={photoPreview} alt="Preview" className="h-32 w-auto rounded object-cover" />
+            ) : (
+              <>
+                <span className="text-2xl mb-1">📷</span>
+                <p className="text-xs text-gray-500 font-medium">Upload after-photo</p>
+              </>
+            )}
+            <input id="resolve-photo" type="file" accept="image/jpeg,image/jpg,image/png" onChange={handlePhoto} required className="sr-only" />
           </label>
-          <input
-            type="file"
-            accept="image/jpeg,image/jpg,image/png"
-            onChange={handlePhoto}
-            required
-            className="w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-green-100 file:text-green-700 hover:file:bg-green-200"
-          />
-          {photoPreview && (
-            <img
-              src={photoPreview}
-              alt="Preview"
-              className="mt-2 h-32 w-auto rounded object-cover border border-green-200"
-            />
-          )}
         </div>
 
-        {/* Resolution note */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Resolution Note <span className="text-red-500">*</span>
-          </label>
+          <label className="label-nivaran">Resolution Note <span className="text-terracotta-alert">*</span></label>
           <textarea
             value={note}
             onChange={e => setNote(e.target.value)}
-            placeholder="Briefly describe what was done to resolve this issue..."
+            placeholder="Briefly describe what was done to resolve this issue…"
             rows={3}
             required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            className="input-nivaran resize-none"
           />
         </div>
 
-        {error && <p className="text-red-600 text-sm">{error}</p>}
+        {error && <p className="text-terracotta-alert text-xs">{error}</p>}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full bg-green-700 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-green-800 transition disabled:bg-gray-400"
-        >
-          {submitting ? 'Uploading & Resolving...' : 'Confirm Resolution'}
+        <button type="submit" disabled={submitting} className="w-full py-3 text-sm font-bold text-white rounded transition"
+          style={{ background: submitting ? '#B5A895' : '#00875A' }}>
+          {submitting ? 'Uploading & Resolving…' : '✦ Confirm Resolution'}
         </button>
       </form>
     </div>
   )
 }
 
-// ── Main Component ─────────────────────────────────────────────────────────────
+// ── Main Component ─────────────────────────────────────
 function StaffTicketDetail() {
   const { id } = useParams()
-  const { user } = useAuth()
   const navigate = useNavigate()
 
   const [report, setReport] = useState(null)
@@ -123,88 +108,70 @@ function StaffTicketDetail() {
   const [actionError, setActionError] = useState('')
   const [showResolveForm, setShowResolveForm] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
-
-  // Comment state
   const [commentText, setCommentText] = useState('')
   const [commentSubmitting, setCommentSubmitting] = useState(false)
   const [commentError, setCommentError] = useState('')
 
-  useEffect(() => {
-    fetchReport()
-  }, [id])
+  useEffect(() => { fetchReport() }, [id])
 
   const fetchReport = async () => {
     try {
       setLoading(true)
       const res = await api.get(`/api/reports/${id}`)
       setReport(res.data.report)
-    } catch {
-      setError('Failed to load ticket')
-    } finally {
-      setLoading(false)
-    }
+    } catch { setError('Failed to load ticket') }
+    finally { setLoading(false) }
   }
 
-  // Start Work: acknowledged → in_progress
   const handleStartWork = async () => {
-    setStatusUpdating(true)
-    setActionError('')
+    setStatusUpdating(true); setActionError('')
     try {
-      const formData = new FormData()
-      formData.append('status', 'in_progress')
-      await api.patch(`/api/reports/${id}/status`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const fd = new FormData()
+      fd.append('status', 'in_progress')
+      await api.patch(`/api/reports/${id}/status`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       fetchReport()
     } catch (err) {
       setActionError(err.response?.data?.message || 'Failed to update status')
-    } finally {
-      setStatusUpdating(false)
-    }
+    } finally { setStatusUpdating(false) }
   }
 
-  const handleResolveSuccess = () => {
-    setShowResolveForm(false)
-    fetchReport()
-  }
+  const handleResolveSuccess = () => { setShowResolveForm(false); fetchReport() }
 
   const handleAddComment = async (e) => {
     e.preventDefault()
     if (!commentText.trim()) return
-    setCommentSubmitting(true)
-    setCommentError('')
+    setCommentSubmitting(true); setCommentError('')
     try {
       const res = await api.post(`/api/reports/${id}/comments`, { text: commentText })
-      setReport(prev => ({
-        ...prev,
-        comments: [...(prev.comments || []), res.data.comment],
-      }))
+      setReport(prev => ({ ...prev, comments: [...(prev.comments || []), res.data.comment] }))
       setCommentText('')
     } catch (err) {
       setCommentError(err.response?.data?.message || 'Failed to add comment')
-    } finally {
-      setCommentSubmitting(false)
-    }
+    } finally { setCommentSubmitting(false) }
   }
 
-  const mapsDirectionsUrl = report
+  const mapsUrl = report
     ? `https://www.openstreetmap.org/directions?from=&to=${report.location.lat}%2C${report.location.lng}#map=17/${report.location.lat}/${report.location.lng}`
     : '#'
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-gray-800 border-t-transparent rounded-full animate-spin" />
+      <div className="page-shell">
+        <StaffNavbar />
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="w-8 h-8 border-4 border-sovereign-indigo border-t-transparent rounded-full animate-spin" />
+        </div>
       </div>
     )
   }
 
   if (error || !report) {
     return (
-      <div className="min-h-screen bg-gray-100 p-4">
-        <div className="max-w-xl mx-auto">
-          <p className="text-red-600 bg-red-50 border border-red-200 p-3 rounded">{error || 'Ticket not found'}</p>
-          <button onClick={() => navigate('/staff')} className="mt-3 text-sm text-gray-600 hover:underline">
+      <div className="page-shell">
+        <StaffNavbar />
+        <div className="max-w-xl mx-auto px-4 py-5">
+          <div className="alert-error">{error || 'Ticket not found'}</div>
+          <button onClick={() => navigate('/staff')} className="mt-3 text-sm text-gray-500 hover:text-sovereign-indigo transition">
             ← Back to Dashboard
           </button>
         </div>
@@ -212,48 +179,60 @@ function StaffTicketDetail() {
     )
   }
 
+  const deptColor = getDeptColor(report.department?.name || report.category?.department?.name)
+  const isResolved = report.status === 'resolved'
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Top bar */}
-      <header className="bg-gray-900 text-white px-4 py-3 flex items-center gap-3 sticky top-0 z-10">
+    <div className="page-shell">
+      {/* Sticky ticket header */}
+      <header className="bg-sovereign-indigo text-white px-4 py-3 flex items-center gap-3 sticky top-0 z-40 shadow">
         <button
           onClick={() => navigate('/staff')}
-          className="text-gray-400 hover:text-white transition text-lg leading-none"
+          className="text-white/70 hover:text-white transition text-lg leading-none"
         >
           ←
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-xs text-gray-400">{report.category?.name}</p>
-          <h1 className="text-base font-semibold truncate">{report.ticketId}</h1>
+          <p className="text-[10px] text-white/50 uppercase tracking-widest" style={{ color: deptColor.dot }}>
+            {report.category?.name}
+          </p>
+          <h1 className="font-display font-bold text-sm truncate">{report.ticketId}</h1>
         </div>
         <StatusBadge status={report.status} size="sm" />
       </header>
 
       <main className="max-w-xl mx-auto px-4 py-5 space-y-4">
 
+        {/* Resolved stamp */}
+        {isResolved && (
+          <div className="flex justify-center py-2">
+            <span className="stamp-resolved text-sm">✦ निवारण · Issue Resolved</span>
+          </div>
+        )}
+
         {/* Before photo */}
         {report.photoUrl && (
-          <div className="bg-white rounded-xl overflow-hidden border border-gray-100 shadow-sm">
-            <p className="text-xs text-gray-500 font-medium px-4 pt-3 pb-1 uppercase tracking-wide">Before Photo</p>
-            <img src={report.photoUrl} alt="Before" className="w-full object-cover max-h-64" />
+          <div className="card-nivaran overflow-hidden">
+            <p className="text-[10px] text-gray-400 uppercase tracking-widest px-4 pt-3 pb-1">Before Photo</p>
+            <img src={report.photoUrl} alt="Before" className="w-full object-cover max-h-60" />
           </div>
         )}
 
         {/* Description */}
-        <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
-          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Description</p>
-          <p className="text-sm text-gray-800">{report.description}</p>
+        <div className="card-nivaran p-4">
+          <p className="label-nivaran mb-2">Description</p>
+          <p className="text-sm text-gray-700 leading-relaxed">{report.description}</p>
         </div>
 
-        {/* Location + Directions */}
-        <div className="bg-white rounded-xl overflow-hidden border border-gray-100 shadow-sm">
+        {/* Location */}
+        <div className="card-nivaran overflow-hidden">
           <div className="flex items-center justify-between px-4 pt-3 pb-2">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Location</p>
+            <p className="label-nivaran mb-0">Location</p>
             <a
-              href={mapsDirectionsUrl}
+              href={mapsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-blue-600 font-medium hover:underline flex items-center gap-1"
+              className="text-xs font-semibold text-kesariya hover:text-civic-flame transition flex items-center gap-1"
             >
               🧭 Get Directions
             </a>
@@ -265,72 +244,78 @@ function StaffTicketDetail() {
               style={{ height: '100%', width: '100%' }}
               zoomControl={false}
             >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              />
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
               <Marker position={[report.location.lat, report.location.lng]} />
             </MapContainer>
           </div>
-          <p className="text-xs text-gray-400 px-4 py-2">
+          <p className="text-[10px] text-gray-400 px-4 py-2">
             {report.location.lat.toFixed(6)}, {report.location.lng.toFixed(6)}
           </p>
         </div>
 
-        {/* Meta: priority, reports, age */}
+        {/* Meta strip */}
         <div className="grid grid-cols-3 gap-2">
           {[
             { label: 'Priority', value: report.priorityScore || 0 },
             { label: 'Reports', value: report.reportCount },
             { label: 'Upvotes', value: report.upvotes?.length || 0 },
           ].map(m => (
-            <div key={m.label} className="bg-white rounded-xl p-3 text-center border border-gray-100 shadow-sm">
-              <p className="text-lg font-bold text-gray-800">{m.value}</p>
-              <p className="text-xs text-gray-500">{m.label}</p>
+            <div key={m.label} className="card-nivaran p-3 text-center">
+              <p className="font-display font-bold text-sovereign-indigo text-lg">{m.value}</p>
+              <p className="text-[10px] text-gray-400 uppercase tracking-wider">{m.label}</p>
             </div>
           ))}
         </div>
 
-        {/* Resolution proof (if resolved) */}
-        {report.status === 'resolved' && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-3">
-            <p className="text-xs font-medium text-green-700 uppercase tracking-wide">Resolution</p>
+        {/* Resolution proof */}
+        {isResolved && (
+          <div className="card-nivaran overflow-hidden" style={{ borderColor: '#00875A40' }}>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-jan-kalyan-green px-4 pt-3 pb-1">Resolution Proof</p>
             {report.resolutionPhotoUrl && (
-              <img
-                src={report.resolutionPhotoUrl}
-                alt="After"
-                className="w-full rounded-lg object-cover max-h-64"
-              />
+              <img src={report.resolutionPhotoUrl} alt="After" className="w-full object-cover max-h-60" />
             )}
             {report.resolutionNote && (
-              <p className="text-sm text-green-900">{report.resolutionNote}</p>
+              <p className="text-sm text-gray-700 px-4 py-3">{report.resolutionNote}</p>
             )}
           </div>
         )}
 
-        {/* ── Action buttons ── */}
-        {actionError && (
-          <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-3 rounded-lg">{actionError}</p>
+        {/* Action buttons */}
+        {actionError && <div className="alert-error text-xs">{actionError}</div>}
+
+        {report.status === 'reported' && (
+          <div className="card-nivaran p-4 border-amber-200" style={{ borderColor: '#FCD34D' }}>
+            <p className="text-sm text-amber-800 mb-3">
+              This ticket is <strong>reported but not yet acknowledged</strong>. Acknowledging it signals you are aware.
+            </p>
+            <button
+              onClick={handleStartWork}
+              disabled={statusUpdating}
+              className="w-full py-2.5 text-sm font-bold text-white rounded transition"
+              style={{ background: statusUpdating ? '#B5A895' : '#F57F17' }}
+            >
+              {statusUpdating ? 'Updating…' : '👁 Acknowledge Ticket'}
+            </button>
+          </div>
         )}
 
-        {/* Acknowledged → Start Work */}
         {report.status === 'acknowledged' && (
           <button
             onClick={handleStartWork}
             disabled={statusUpdating}
-            className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-semibold text-sm hover:bg-blue-700 transition disabled:bg-gray-400 active:scale-[0.98]"
+            className="w-full btn-primary py-3 text-sm"
           >
-            {statusUpdating ? 'Updating...' : '▶ Start Work'}
+            {statusUpdating ? 'Updating…' : '▶ Start Work'}
           </button>
         )}
 
-        {/* In Progress → Mark Resolved (with form) */}
         {report.status === 'in_progress' && !showResolveForm && (
           <button
             onClick={() => setShowResolveForm(true)}
-            className="w-full bg-green-700 text-white py-3.5 rounded-xl font-semibold text-sm hover:bg-green-800 transition active:scale-[0.98]"
+            className="w-full py-3 text-sm font-bold text-white rounded transition active:scale-[0.98]"
+            style={{ background: '#00875A' }}
           >
-            ✓ Mark as Resolved
+            ✦ Mark as Resolved
           </button>
         )}
 
@@ -338,27 +323,9 @@ function StaffTicketDetail() {
           <ResolveForm reportId={id} onSuccess={handleResolveSuccess} />
         )}
 
-        {/* Reported → shouldn't happen for staff (reported means unacknowledged/unassigned) */}
-        {report.status === 'reported' && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-            <p className="text-sm text-yellow-800">
-              This ticket is <strong>reported but not yet acknowledged</strong>. Acknowledging it signals you are aware. Use "Start Work" only once you have physically started addressing the issue.
-            </p>
-            <button
-              onClick={handleStartWork}
-              disabled={statusUpdating}
-              className="mt-3 w-full bg-yellow-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-yellow-700 transition disabled:bg-gray-400"
-            >
-              {statusUpdating ? 'Updating...' : 'Acknowledge Ticket'}
-            </button>
-          </div>
-        )}
-
-        {/* ── Comments ── */}
-        <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
-          <h2 className="font-semibold text-gray-800 text-sm mb-3">
-            Comments ({report.comments?.length || 0})
-          </h2>
+        {/* Comments */}
+        <div className="card-nivaran p-4">
+          <p className="label-nivaran mb-3">Comments ({report.comments?.length || 0})</p>
 
           <div className="space-y-3 mb-4">
             {(!report.comments || report.comments.length === 0) ? (
@@ -366,24 +333,17 @@ function StaffTicketDetail() {
             ) : (
               report.comments.map((comment, idx) => (
                 <div key={comment._id || idx} className="flex gap-2.5">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${
-                    comment.authorRole === 'staff' ? 'bg-blue-600' :
-                    comment.authorRole === 'admin' ? 'bg-purple-600' : 'bg-gray-500'
-                  }`}>
+                  <div className="w-7 h-7 rounded-full bg-sovereign-indigo/10 flex items-center justify-center text-sovereign-indigo text-xs font-bold flex-shrink-0">
                     {comment.author?.name?.[0]?.toUpperCase() || '?'}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-1.5 mb-0.5">
-                      <span className="text-xs font-medium text-gray-800">{comment.author?.name || 'Unknown'}</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                        comment.authorRole === 'staff' ? 'bg-blue-100 text-blue-700' :
-                        comment.authorRole === 'admin' ? 'bg-purple-100 text-purple-700' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
+                      <span className="text-xs font-semibold text-gray-800">{comment.author?.name || 'Unknown'}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${roleBadgeClass(comment.authorRole)}`}>
                         {roleLabel(comment.authorRole)}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-700 bg-gray-50 rounded-lg px-2.5 py-1.5">
+                    <p className="text-xs text-gray-700 bg-parchment rounded px-2.5 py-1.5 border border-earthen-slate">
                       {comment.text}
                     </p>
                   </div>
@@ -392,24 +352,23 @@ function StaffTicketDetail() {
             )}
           </div>
 
-          {/* Add comment */}
           <form onSubmit={handleAddComment} className="flex gap-2">
             <input
               type="text"
               value={commentText}
               onChange={e => setCommentText(e.target.value)}
-              placeholder="Add a note..."
-              className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
+              placeholder="Add a note…"
+              className="input-nivaran flex-1"
             />
             <button
               type="submit"
               disabled={commentSubmitting || !commentText.trim()}
-              className="bg-gray-800 text-white px-3 py-2 rounded-lg text-sm hover:bg-gray-900 transition disabled:bg-gray-400"
+              className="btn-primary px-3 py-2 text-sm"
             >
-              {commentSubmitting ? '...' : 'Post'}
+              {commentSubmitting ? '…' : 'Post'}
             </button>
           </form>
-          {commentError && <p className="text-red-600 text-xs mt-1">{commentError}</p>}
+          {commentError && <p className="text-terracotta-alert text-xs mt-1">{commentError}</p>}
         </div>
       </main>
     </div>
