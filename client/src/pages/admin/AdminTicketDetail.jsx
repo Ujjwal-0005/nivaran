@@ -107,10 +107,10 @@ function AdminTicketDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="page-shell flex flex-col">
         <AdminNavbar />
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 border-4 border-orange-600 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-4 border-sovereign-indigo border-t-transparent rounded-full animate-spin" />
         </div>
       </div>
     )
@@ -118,11 +118,11 @@ function AdminTicketDetail() {
 
   if (!report) {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="page-shell flex flex-col">
         <AdminNavbar />
         <div className="p-8 max-w-xl mx-auto text-center">
-          <p className="text-red-600 font-semibold">Ticket not found</p>
-          <button onClick={() => navigate('/admin/tickets')} className="mt-4 text-sm text-gray-600 underline">
+          <p className="text-terracotta-alert font-semibold">Ticket not found</p>
+          <button onClick={() => navigate('/admin/tickets')} className="mt-4 text-sm text-gray-500 hover:text-kesariya transition underline">
             ← Back to Tickets
           </button>
         </div>
@@ -137,22 +137,22 @@ function AdminTicketDetail() {
     : null
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="page-shell flex flex-col">
       <AdminNavbar />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      <main className="flex-1 page-content-wide space-y-6">
         {/* Top Breadcrumb & Action */}
         <div className="flex items-center justify-between">
           <button
             onClick={() => navigate('/admin/tickets')}
-            className="text-xs sm:text-sm font-semibold text-gray-600 hover:text-gray-900 flex items-center gap-1.5"
+            className="text-xs sm:text-sm font-semibold text-gray-500 hover:text-kesariya transition flex items-center gap-1.5"
           >
             ← Back to All Tickets
           </button>
           <div className="flex items-center gap-2">
             <StatusBadge status={report.status} size="md" />
             {report.isEscalated && (
-              <span className="bg-red-100 text-red-700 border border-red-300 text-xs font-bold px-2.5 py-1 rounded-md animate-pulse">
+              <span className="badge-escalated text-xs px-2.5 py-1">
                 🚨 AUTO-ESCALATED (+50)
               </span>
             )}
@@ -164,13 +164,13 @@ function AdminTicketDetail() {
           {/* Main Info (Left 2 cols) */}
           <div className="lg:col-span-2 space-y-6">
             {/* Header Card */}
-            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm space-y-4">
+            <div className="card-nivaran p-6 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-4">
                 <div>
-                  <span className="font-mono text-xs font-bold text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded">
+                  <span className="font-mono text-xs font-bold text-sovereign-indigo bg-parchment border border-earthen-slate px-2 py-0.5 rounded">
                     {report.ticketId}
                   </span>
-                  <h1 className="text-xl font-bold text-gray-900 mt-1">
+                  <h1 className="font-display text-xl font-bold text-gray-900 mt-1">
                     {report.category?.name || 'General Issue'}
                   </h1>
                 </div>
@@ -215,7 +215,7 @@ function AdminTicketDetail() {
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
                   Citizen Description
                 </p>
-                <p className="text-sm text-gray-800 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                <p className="text-sm text-gray-800 bg-parchment p-3 rounded border border-earthen-slate">
                   {report.description}
                 </p>
               </div>
@@ -232,19 +232,19 @@ function AdminTicketDetail() {
 
               {/* Dispute info if disputed */}
               {report.status === 'disputed' && (
-                <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 space-y-2">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-orange-800 uppercase tracking-wider">
+                    <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
                       ⚠️ Citizen Dispute Filed
                     </span>
                     <button
                       onClick={() => navigate('/admin/disputes')}
-                      className="text-xs font-bold text-orange-700 hover:underline"
+                      className="text-xs font-bold text-kesariya hover:text-civic-flame transition"
                     >
                       Resolve in Disputes Queue →
                     </button>
                   </div>
-                  <p className="text-sm text-orange-950 font-medium">
+                  <p className="text-sm text-amber-950 font-medium italic">
                     "{report.disputeReason}"
                   </p>
                 </div>
@@ -252,9 +252,9 @@ function AdminTicketDetail() {
             </div>
 
             {/* Map & Location */}
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-              <div className="px-6 py-3 border-b border-gray-100 flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-500 uppercase">Geographic Location</span>
+            <div className="card-nivaran overflow-hidden">
+              <div className="px-6 py-3 border-b border-earthen-slate flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Geographic Location</span>
                 <span className="text-xs text-gray-500">
                   Lat: {report.location?.lat.toFixed(5)}, Lng: {report.location?.lng.toFixed(5)}
                 </span>
@@ -275,8 +275,8 @@ function AdminTicketDetail() {
             </div>
 
             {/* Comments Thread */}
-            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm space-y-4">
-              <h3 className="font-bold text-gray-900 text-sm">
+            <div className="card-nivaran p-6 space-y-4">
+              <h3 className="font-display font-bold text-sovereign-indigo text-sm">
                 Activity & Comment Thread ({report.comments?.length || 0})
               </h3>
 
@@ -320,12 +320,12 @@ function AdminTicketDetail() {
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
                   placeholder="Write an internal admin note or instruction..."
-                  className="flex-1 text-xs border border-gray-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="input-nivaran flex-1"
                 />
                 <button
                   type="submit"
                   disabled={commentSubmitting || !commentText.trim()}
-                  className="bg-gray-900 hover:bg-black text-white text-xs font-semibold px-4 py-2 rounded-xl disabled:bg-gray-400 transition"
+                  className="btn-primary text-xs px-4 py-2"
                 >
                   {commentSubmitting ? '...' : 'Post Note'}
                 </button>
@@ -339,7 +339,7 @@ function AdminTicketDetail() {
             <div
               className={`rounded-2xl p-5 border shadow-sm ${
                 report.isEscalated
-                  ? 'bg-red-50/90 border-red-300 text-red-900'
+                  ? 'bg-terracotta-alert/10 border-terracotta-alert/30 text-terracotta-alert'
                   : isOverdue
                   ? 'bg-amber-50 border-amber-300 text-amber-900'
                   : 'bg-white border-gray-200'
@@ -368,7 +368,7 @@ function AdminTicketDetail() {
                   <span className="text-gray-500">Time Remaining:</span>
                   <span
                     className={`font-bold ${
-                      isOverdue || report.isEscalated ? 'text-red-600' : 'text-emerald-700'
+                      isOverdue || report.isEscalated ? 'text-terracotta-alert' : 'text-jan-kalyan-green'
                     }`}
                   >
                     {report.status === 'resolved'
@@ -382,7 +382,7 @@ function AdminTicketDetail() {
                 </div>
 
                 {report.isEscalated && (
-                  <div className="pt-2 border-t border-red-200 text-red-700 font-bold text-xs">
+                  <div className="pt-2 border-t border-terracotta-alert/30 text-terracotta-alert font-bold text-xs">
                     🚨 Ticket has breached SLA! Priority score boosted (+50) to expedite resolution.
                   </div>
                 )}
@@ -390,9 +390,9 @@ function AdminTicketDetail() {
             </div>
 
             {/* Staff Assignment Control */}
-            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm space-y-4">
+            <div className="card-nivaran p-5 space-y-4">
               <div>
-                <h3 className="font-bold text-gray-900 text-sm">Staff Assignment</h3>
+                <h3 className="font-display font-bold text-sovereign-indigo text-sm">Staff Assignment</h3>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Allocate to verified staff in {report.department?.name || 'the routed department'}.
                 </p>
@@ -428,7 +428,7 @@ function AdminTicketDetail() {
                 <select
                   value={selectedStaffId}
                   onChange={(e) => setSelectedStaffId(e.target.value)}
-                  className="w-full text-xs border border-gray-300 rounded-xl p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="input-nivaran w-full"
                 >
                   <option value="">-- Choose Staff Member --</option>
                   {departmentStaff.map((s) => (
@@ -448,7 +448,7 @@ function AdminTicketDetail() {
               <button
                 onClick={() => handleAssign(false)}
                 disabled={assigning || !selectedStaffId}
-                className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold py-2.5 rounded-xl shadow transition disabled:bg-gray-300"
+                className="btn-kesariya w-full py-2.5 text-xs font-bold"
               >
                 {assigning ? 'Assigning...' : 'Assign Selected Staff'}
               </button>
@@ -458,7 +458,7 @@ function AdminTicketDetail() {
                 <button
                   onClick={() => handleAssign(true)}
                   disabled={assigning || departmentStaff.length === 0}
-                  className="w-full bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 text-xs font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="btn-ghost w-full py-2.5 text-xs font-bold flex items-center justify-center gap-1.5"
                 >
                   ⚖️ Auto-Assign (Least Loaded)
                 </button>
@@ -469,8 +469,8 @@ function AdminTicketDetail() {
             </div>
 
             {/* Quick Metrics */}
-            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm space-y-3 text-xs">
-              <h3 className="font-bold text-gray-900 uppercase tracking-wider text-[11px]">
+            <div className="card-nivaran p-5 space-y-3 text-xs">
+              <h3 className="font-display font-bold text-sovereign-indigo uppercase tracking-wider text-[11px]">
                 Report Metrics
               </h3>
               <div className="grid grid-cols-2 gap-2">

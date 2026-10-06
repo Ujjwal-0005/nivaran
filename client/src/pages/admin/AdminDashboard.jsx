@@ -83,14 +83,14 @@ function AdminDashboard() {
     .slice(0, 8)
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="page-shell flex flex-col">
       <AdminNavbar />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="flex-1 page-content-wide space-y-8">
         {/* Header Title */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold text-sovereign-indigo tracking-tight">
               Municipality Overview
             </h1>
             <p className="text-sm text-gray-500 mt-1">
@@ -100,71 +100,68 @@ function AdminDashboard() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate('/admin/map')}
-              className="bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium px-4 py-2 rounded-lg shadow transition flex items-center gap-1.5"
+              className="btn-kesariya text-sm flex items-center gap-1.5"
             >
-              🗺️ Open Live Map
+              🗺️ Live Map
             </button>
             <button
               onClick={() => navigate('/admin/tickets')}
-              className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition"
+              className="btn-ghost text-sm"
             >
               📋 All Tickets
             </button>
           </div>
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm">
-            {error}
-          </div>
-        )}
+        {error && <div className="alert-error">{error}</div>}
 
         {/* 4 Quick Stat Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {/* Card 1 */}
           <div
             onClick={() => navigate('/admin/tickets?status=open')}
-            className="bg-white rounded-2xl p-5 border border-gray-200/80 shadow-sm hover:shadow transition cursor-pointer"
+            className="card-nivaran p-5 hover:shadow-md transition cursor-pointer group"
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                Total Open Tickets
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                Total Open
               </span>
-              <span className="p-2 rounded-xl bg-blue-50 text-blue-600 text-lg">📂</span>
+              <span className="p-2 rounded bg-sovereign-indigo/10 text-sovereign-indigo text-lg">📂</span>
             </div>
-            <p className="text-3xl font-extrabold text-gray-900 mt-3">{openTickets.length}</p>
+            <p className="font-display text-3xl font-bold text-sovereign-indigo mt-3">{openTickets.length}</p>
             <p className="text-xs text-gray-400 mt-1">Requiring municipal action</p>
           </div>
 
           {/* Card 2 */}
           <div
             onClick={() => navigate('/admin/tickets?escalated=true')}
-            className="bg-white rounded-2xl p-5 border border-red-100 shadow-sm hover:shadow transition cursor-pointer"
+            className="card-nivaran p-5 hover:shadow-md transition cursor-pointer border-terracotta-alert/20"
+            style={{ borderColor: '#B84A3940' }}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-red-600 uppercase tracking-wider">
+              <span className="text-[10px] font-bold text-terracotta-alert uppercase tracking-widest">
                 Breaching / Near SLA
               </span>
-              <span className="p-2 rounded-xl bg-red-50 text-red-600 text-lg">⏱️</span>
+              <span className="p-2 rounded bg-terracotta-alert/10 text-terracotta-alert text-lg">⏱️</span>
             </div>
-            <p className="text-3xl font-extrabold text-red-600 mt-3">
+            <p className="font-display text-3xl font-bold text-terracotta-alert mt-3">
               {breachingOrNearSla.length}
             </p>
-            <p className="text-xs text-red-500/80 mt-1">Escalated or &le; 6 hrs left</p>
+            <p className="text-xs text-terracotta-alert/70 mt-1">Escalated or ≤ 6 hrs left</p>
           </div>
 
           {/* Card 3 */}
           <div
             onClick={() => navigate('/admin/tickets?status=resolved')}
-            className="bg-white rounded-2xl p-5 border border-gray-200/80 shadow-sm hover:shadow transition cursor-pointer"
+            className="card-nivaran p-5 hover:shadow-md transition cursor-pointer"
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-green-700 uppercase tracking-wider">
+              <span className="text-[10px] font-bold text-jan-kalyan-green uppercase tracking-widest">
                 Resolved This Week
               </span>
-              <span className="p-2 rounded-xl bg-green-50 text-green-700 text-lg">✅</span>
+              <span className="p-2 rounded bg-jan-kalyan-green/10 text-jan-kalyan-green text-lg">✦</span>
             </div>
-            <p className="text-3xl font-extrabold text-green-700 mt-3">
+            <p className="font-display text-3xl font-bold text-jan-kalyan-green mt-3">
               {resolvedThisWeek.length}
             </p>
             <p className="text-xs text-gray-400 mt-1">Last 7 calendar days</p>
@@ -173,27 +170,28 @@ function AdminDashboard() {
           {/* Card 4 */}
           <div
             onClick={() => navigate('/admin/disputes')}
-            className="bg-white rounded-2xl p-5 border border-orange-200 shadow-sm hover:shadow transition cursor-pointer"
+            className="card-nivaran p-5 hover:shadow-md transition cursor-pointer"
+            style={{ borderColor: '#E6510030' }}
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-orange-700 uppercase tracking-wider">
+              <span className="text-[10px] font-bold text-kesariya uppercase tracking-widest">
                 Active Disputes
               </span>
-              <span className="p-2 rounded-xl bg-orange-50 text-orange-700 text-lg">⚠️</span>
+              <span className="p-2 rounded bg-kesariya/10 text-kesariya text-lg">⚠️</span>
             </div>
-            <p className="text-3xl font-extrabold text-orange-600 mt-3">
+            <p className="font-display text-3xl font-bold text-kesariya mt-3">
               {activeDisputesCount}
             </p>
-            <p className="text-xs text-orange-500/80 mt-1">Awaiting admin review</p>
+            <p className="text-xs text-gray-400 mt-1">Awaiting admin review</p>
           </div>
         </div>
 
         {/* Needs Attention Feed */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="card-nivaran overflow-hidden">
+          <div className="px-6 py-4 border-b border-earthen-slate flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-lg">🔥</span>
-              <h2 className="text-base font-bold text-gray-900">Needs Attention Feed</h2>
+              <h2 className="font-display text-base font-bold text-sovereign-indigo">Needs Attention Feed</h2>
               <span className="text-xs text-gray-400">
                 (Auto-Escalated & Disputed reports, sorted by priority)
               </span>
@@ -224,22 +222,22 @@ function AdminDashboard() {
                   <div
                     key={ticket._id}
                     onClick={() => navigate(`/admin/tickets/${ticket._id}`)}
-                    className="p-5 hover:bg-orange-50/40 transition flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer"
+                    className="p-5 hover:bg-parchment transition flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer"
                   >
                     <div className="space-y-1.5 flex-1 min-w-0">
                       <div className="flex items-center flex-wrap gap-2">
-                        <span className="font-mono text-xs font-bold text-gray-800 bg-gray-100 px-2 py-0.5 rounded">
+                        <span className="font-mono text-xs font-bold text-sovereign-indigo bg-parchment border border-earthen-slate px-2 py-0.5 rounded">
                           {ticket.ticketId}
                         </span>
                         <StatusBadge status={ticket.status} size="sm" />
                         {ticket.isEscalated && (
-                          <span className="bg-red-100 text-red-700 border border-red-300 text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1 animate-pulse">
-                            🚨 ESCALATED (+50)
+                          <span className="badge-escalated">
+                            🚨 Escalated
                           </span>
                         )}
                         {ticket.status === 'disputed' && (
-                          <span className="bg-orange-100 text-orange-800 border border-orange-300 text-xs font-semibold px-2 py-0.5 rounded">
-                            Disputed by Citizen
+                          <span className="bg-amber-50 text-amber-800 border border-amber-300 text-xs font-semibold px-2 py-0.5 rounded">
+                            ⚠️ Disputed
                           </span>
                         )}
                       </div>

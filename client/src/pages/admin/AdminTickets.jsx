@@ -143,14 +143,14 @@ function AdminTickets() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="page-shell flex flex-col">
       <AdminNavbar />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      <main className="flex-1 page-content-wide space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+            <h1 className="font-display text-2xl font-bold text-sovereign-indigo tracking-tight">
               All Tickets Master Table
             </h1>
             <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
@@ -165,7 +165,7 @@ function AdminTickets() {
         </div>
 
         {/* Filter & Search Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+        <div className="card-nivaran p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             {/* Search */}
             <div className="lg:col-span-2">
@@ -174,7 +174,7 @@ function AdminTickets() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search ticket ID, description, category, staff..."
-                className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500 bg-gray-50/50"
+                className="input-nivaran w-full"
               />
             </div>
 
@@ -183,7 +183,7 @@ function AdminTickets() {
               <select
                 value={statusFilter}
                 onChange={(e) => handleFilterChange('status', e.target.value)}
-                className="w-full text-xs sm:text-sm px-3 py-2.5 rounded-xl border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="input-nivaran w-full"
               >
                 <option value="">All Statuses</option>
                 <option value="open">Open Only</option>
@@ -203,7 +203,7 @@ function AdminTickets() {
                   handleFilterChange('department', e.target.value)
                   handleFilterChange('category', '') // reset category
                 }}
-                className="w-full text-xs sm:text-sm px-3 py-2.5 rounded-xl border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="input-nivaran w-full"
               >
                 <option value="">All Departments</option>
                 {departments.map((d) => (
@@ -215,7 +215,7 @@ function AdminTickets() {
             </div>
 
             {/* Escalated Toggle */}
-            <div className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-xl bg-gray-50">
+            <div className="flex items-center gap-2 px-3 py-2 border border-terracotta-alert/30 rounded bg-terracotta-alert/5">
               <input
                 type="checkbox"
                 id="escalatedTable"
@@ -231,11 +231,11 @@ function AdminTickets() {
         </div>
 
         {/* Tickets Table */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="card-nivaran overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs sm:text-sm">
               <thead>
-                <tr className="bg-gray-100/70 border-b border-gray-200 text-gray-600 font-bold uppercase tracking-wider text-[11px]">
+                <tr className="bg-parchment border-b border-earthen-slate text-gray-500 font-bold uppercase tracking-wider text-[11px]">
                   <th className="py-3.5 px-4">Ticket ID</th>
                   <th className="py-3.5 px-4">Category & Dept</th>
                   <th className="py-3.5 px-4">Status</th>
@@ -270,7 +270,7 @@ function AdminTickets() {
                   <th className="py-3.5 px-4 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-earthen-slate">
                 {loading ? (
                   <tr>
                     <td colSpan="8" className="py-12 text-center text-gray-400">
@@ -290,13 +290,13 @@ function AdminTickets() {
                       <tr
                         key={r._id}
                         onClick={() => navigate(`/admin/tickets/${r._id}`)}
-                        className="hover:bg-orange-50/40 cursor-pointer transition"
+                        className="hover:bg-parchment cursor-pointer transition"
                       >
-                        <td className="py-3.5 px-4 font-mono font-bold text-gray-900 whitespace-nowrap">
+                        <td className="py-3.5 px-4 font-mono font-bold text-sovereign-indigo whitespace-nowrap">
                           {r.ticketId}
                         </td>
                         <td className="py-3.5 px-4">
-                          <p className="font-semibold text-gray-900 leading-tight">
+                          <p className="font-semibold text-sovereign-indigo leading-tight">
                             {r.category?.name || 'General'}
                           </p>
                           <p className="text-[11px] text-gray-500">{r.department?.name || 'Unassigned'}</p>
@@ -308,8 +308,8 @@ function AdminTickets() {
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-gray-800">{r.priorityScore || 0}</span>
                             {r.isEscalated && (
-                              <span className="text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded border border-red-200">
-                                +50
+                              <span className="badge-escalated">
+                                🚨 Escalated
                               </span>
                             )}
                           </div>
@@ -319,9 +319,9 @@ function AdminTickets() {
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           {r.assignedTo ? (
-                            <span className="font-medium text-gray-800">{r.assignedTo.name}</span>
+                            <span className="font-medium text-sovereign-indigo">{r.assignedTo.name}</span>
                           ) : (
-                            <span className="text-red-500 font-semibold text-xs">⚠️ Unassigned</span>
+                            <span className="text-terracotta-alert font-semibold text-xs">⚠️ Unassigned</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap">
@@ -332,7 +332,7 @@ function AdminTickets() {
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          <span className="text-orange-600 font-semibold text-xs hover:underline">
+                          <span className="text-kesariya font-semibold text-xs hover:text-civic-flame">
                             View →
                           </span>
                         </td>
