@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "seed": "node seed.js"
+    "seed": "node seed.js",
+    "db:reset": "node resetDb.js --confirm",
+    "db:fresh": "node resetDb.js --confirm && node seed.js"
   },
   "keywords": [],
   "author": "",
