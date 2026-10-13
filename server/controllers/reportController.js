@@ -515,6 +515,18 @@ export const disputeReport = async (req, res) => {
     report.status = 'disputed'
     await report.save()
 
+    // Notify admins about the dispute
+    const { notifyAdmins } = await import('../utils/notify.js')
+    const disputePayload = {
+      reportId: report._id,
+      ticketId: report.ticketId,
+      category: (await Category.findById(report.category))?.name || 'Civic Issue',
+      citizen: report.citizen,
+      disputeReason: reason.trim(),
+      message: `Citizen disputed resolution for ${report.ticketId}: "${reason.trim().substring(0, 60)}${reason.trim().length > 60 ? '...' : ''}"`,
+    }
+    notifyAdmins('dispute_created', disputePayload)
+
     res.status(200).json({
       message: 'Dispute submitted. The municipal admin will review this report.',
       status: report.status,
@@ -1074,6 +1086,18 @@ export const resolveDispute = async (req, res) => {
     }
 
     await report.save()
+
+    // Notify the citizen about dispute resolution
+    const { notifyUser } = await import('../utils/notify.js')
+    const resolutionPayload = {
+      reportId: report._id,
+      ticketId: report.ticketId,
+      category: report.category?.name || 'Civic Issue',
+      action,
+      note: note.trim(),
+      message: `Admin ${action === 'reassign' ? 'reopened' : action === 'mark_resolved' ? 'confirmed resolution' : 'escalated'} your dispute for ${report.ticketId}`,
+    }
+    notifyUser(report.citizen, 'dispute_resolved', resolutionPayload)
 
     const updated = await Report.findById(id)
       .populate('category', 'name severityWeight slaHours')

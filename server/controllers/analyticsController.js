@@ -90,12 +90,12 @@ export const getCategoryAnalytics = async (req, res) => {
 
 /**
  * 3. GET /api/analytics/by-department (admin only)
- * For each department: total reports, resolved count, average resolution time, average citizen rating
+ * For each department: total reports, resolved count, average resolution time, average citizen rating, dispute rate
  */
 export const getDepartmentAnalytics = async (req, res) => {
   try {
     const departments = await Department.find().select('name')
-    const reports = await Report.find().select('department status createdAt resolvedAt updatedAt rating')
+    const reports = await Report.find().select('department status createdAt resolvedAt updatedAt rating isDisputed')
 
     const deptMap = {}
     departments.forEach((d) => {
@@ -105,6 +105,7 @@ export const getDepartmentAnalytics = async (req, res) => {
         total: 0,
         resolved: 0,
         open: 0,
+        disputed: 0,
         totalHours: 0,
         resolvedCountForHours: 0,
         totalRatingScore: 0,
@@ -127,6 +128,8 @@ export const getDepartmentAnalytics = async (req, res) => {
                 deptMap[deptId].resolvedCountForHours += 1
               }
             }
+          } else if (r.status === 'disputed') {
+            deptMap[deptId].disputed += 1
           } else {
             deptMap[deptId].open += 1
           }
@@ -149,6 +152,9 @@ export const getDepartmentAnalytics = async (req, res) => {
       const resolutionRate = d.total > 0
         ? Number(((d.resolved / d.total) * 100).toFixed(1))
         : 0
+      const disputeRate = d.total > 0
+        ? Number(((d.disputed / d.total) * 100).toFixed(1))
+        : 0
 
       return {
         departmentId: d.departmentId,
@@ -156,7 +162,9 @@ export const getDepartmentAnalytics = async (req, res) => {
         total: d.total,
         resolved: d.resolved,
         open: d.open,
+        disputed: d.disputed,
         resolutionRate,
+        disputeRate,
         avgResolutionHours,
         avgRating,
       }

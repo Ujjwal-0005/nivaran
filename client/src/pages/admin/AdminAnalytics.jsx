@@ -200,6 +200,7 @@ function AdminAnalytics() {
                   <th className="py-3 px-4 text-center">Resolved</th>
                   <th className="py-3 px-4 text-center">Open</th>
                   <th className="py-3 px-4 text-center">Resolution Rate</th>
+                  <th className="py-3 px-4 text-center">Dispute Rate</th>
                   <th className="py-3 px-4 text-center">Avg Resolution Time</th>
                   <th className="py-3 px-4 text-center">Avg Citizen Rating</th>
                 </tr>
@@ -215,6 +216,15 @@ function AdminAnalytics() {
                       <span className="inline-block bg-green-50 text-green-700 border border-green-200 font-bold px-2 py-0.5 rounded text-xs">
                         {d.resolutionRate}%
                       </span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {d.disputeRate > 0 ? (
+                        <span className="inline-block bg-orange-50 text-orange-700 border border-orange-200 font-bold px-2 py-0.5 rounded text-xs">
+                          {d.disputeRate}%
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">0%</span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center font-medium text-gray-700">
                       {d.avgResolutionHours > 0 ? `${d.avgResolutionHours} hrs` : '—'}
