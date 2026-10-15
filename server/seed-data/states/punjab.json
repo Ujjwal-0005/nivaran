@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Jalandhar",
+    "nameLocal": "ਜਲੰਧਰ",
+    "state": "Punjab",
+    "type": "corporation",
+    "lgdCode": null,
+    "_verify": true,
+    "centroid": {
+      "lat": 31.3260,
+      "lng": 75.5762
+    },
+    "defaultZoom": 13,
+    "subdivisions": []
+  },
+  {
+    "name": "Phagwara",
+    "nameLocal": "ਫਗਵਾੜਾ",
+    "state": "Punjab",
+    "type": "corporation",
+    "lgdCode": null,
+    "_verify": true,
+    "centroid": {
+      "lat": 31.2240,
+      "lng": 75.7708
+    },
+    "defaultZoom": 13,
+    "subdivisions": []
+  }
+]
