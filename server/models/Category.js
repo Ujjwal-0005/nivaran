@@ -5,11 +5,12 @@ const categorySchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
+    trim: true,
   },
-  department: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Department',
+  departmentKey: {
+    type: String,
     required: true,
+    trim: true,
   },
   severityWeight: {
     type: Number,

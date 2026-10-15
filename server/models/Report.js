@@ -26,6 +26,12 @@ const reportSchema = new mongoose.Schema({
     required: true,
     unique: true,
   },
+  municipality: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Municipality',
+    required: true,
+    index: true,
+  },
   citizen: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -39,7 +45,11 @@ const reportSchema = new mongoose.Schema({
   department: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Department',
-    required: true,
+    default: null,
+  },
+  departmentUnresolved: {
+    type: Boolean,
+    default: false,
   },
   description: {
     type: String,
@@ -104,17 +114,14 @@ const reportSchema = new mongoose.Schema({
   disputeReason: {
     type: String,
   },
-  // Phase 6: staff assignment — set by Admin (Phase 7)
   assignedTo: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null,
   },
-  // Phase 6: note staff adds when marking resolved
   resolutionNote: {
     type: String,
   },
-  // Phase 7: SLA and Escalation
   slaDeadline: {
     type: Date,
   },
@@ -125,12 +132,14 @@ const reportSchema = new mongoose.Schema({
   escalatedAt: {
     type: Date,
   },
-  // Phase 9: Resolution timestamp for analytics
   resolvedAt: {
     type: Date,
   },
 }, {
   timestamps: true,
 })
+
+reportSchema.index({ municipality: 1, status: 1 })
+reportSchema.index({ municipality: 1, createdAt: -1 })
 
 export default mongoose.model('Report', reportSchema)

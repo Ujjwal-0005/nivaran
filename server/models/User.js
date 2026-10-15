@@ -16,8 +16,34 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['citizen', 'staff', 'admin'],
+    enum: ['citizen', 'staff', 'admin', 'superadmin'],
     required: true,
+  },
+  municipality: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Municipality',
+    required: function () {
+      return this.role !== 'superadmin'
+    },
+    index: true,
+  },
+  homeAddress: {
+    text: {
+      type: String,
+      default: '',
+    },
+    lat: {
+      type: Number,
+      default: null,
+    },
+    lng: {
+      type: Number,
+      default: null,
+    },
+  },
+  tokenVersion: {
+    type: Number,
+    default: 0,
   },
   phone: {
     type: String,

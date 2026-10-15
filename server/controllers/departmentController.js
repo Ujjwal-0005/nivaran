@@ -1,35 +1,45 @@
 import Department from '../models/Department.js'
-import Category from '../models/Category.js'
+import { scopeFilter, findInScope } from '../utils/scope.js'
 
 // GET /api/departments (admin or authenticated)
 export const getDepartments = async (req, res) => {
   try {
-    const departments = await Department.find().sort({ name: 1 })
+    const filter = scopeFilter(req)
+    const departments = await Department.find(filter).sort({ name: 1 })
     res.status(200).json({ departments })
   } catch (error) {
-    console.error('Get departments error:', error)
-    res.status(500).json({ message: 'Server error fetching departments' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching departments' })
   }
 }
 
 // POST /api/departments (admin only)
 export const createDepartment = async (req, res) => {
   try {
-    const { name, description } = req.body
+    const { name, key, description } = req.body
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Department name is required' })
     }
 
+    const deptKey = (key || name.trim().toLowerCase().replace(/\s+/g, '_')).trim()
+    const filter = scopeFilter(req)
+
     const existing = await Department.findOne({
-      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+      municipality: filter.municipality,
+      $or: [
+        { name: { $regex: new RegExp(`^${name.trim()}$`, 'i') } },
+        { key: deptKey },
+      ],
     })
     if (existing) {
-      return res.status(400).json({ message: 'Department with this name already exists' })
+      return res.status(400).json({ message: 'Department with this name or key already exists in this municipality' })
     }
 
     const department = await Department.create({
       name: name.trim(),
+      key: deptKey,
+      municipality: filter.municipality,
       description: description ? description.trim() : '',
     })
 
@@ -38,8 +48,8 @@ export const createDepartment = async (req, res) => {
       department,
     })
   } catch (error) {
-    console.error('Create department error:', error)
-    res.status(500).json({ message: 'Server error creating department' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error creating department' })
   }
 }
 
@@ -47,22 +57,32 @@ export const createDepartment = async (req, res) => {
 export const updateDepartment = async (req, res) => {
   try {
     const { id } = req.params
-    const { name, description } = req.body
+    const { name, key, description } = req.body
 
-    const department = await Department.findById(id)
-    if (!department) {
-      return res.status(404).json({ message: 'Department not found' })
-    }
+    const department = await findInScope(Department, req, id)
 
     if (name && name.trim()) {
       const duplicate = await Department.findOne({
         _id: { $ne: id },
+        municipality: department.municipality,
         name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
       })
       if (duplicate) {
         return res.status(400).json({ message: 'Another department with this name already exists' })
       }
       department.name = name.trim()
+    }
+
+    if (key && key.trim()) {
+      const duplicateKey = await Department.findOne({
+        _id: { $ne: id },
+        municipality: department.municipality,
+        key: key.trim(),
+      })
+      if (duplicateKey) {
+        return res.status(400).json({ message: 'Another department with this key already exists' })
+      }
+      department.key = key.trim()
     }
 
     if (description !== undefined) {
@@ -76,7 +96,7 @@ export const updateDepartment = async (req, res) => {
       department,
     })
   } catch (error) {
-    console.error('Update department error:', error)
-    res.status(500).json({ message: 'Server error updating department' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error updating department' })
   }
 }
