@@ -2,6 +2,7 @@ import { getIO } from '../config/socket.js'
 
 /**
  * Send real-time notification to a specific user's personal room
+ * Room format: user:<userId>
  * @param {string|ObjectId} userId
  * @param {string} event
  * @param {object} payload
@@ -10,8 +11,9 @@ export const notifyUser = async (userId, event, payload) => {
   try {
     const io = getIO()
     if (userId) {
-      io.to(userId.toString()).emit(event, payload)
-      console.log(`[Notification] Emitted '${event}' to user ${userId}`)
+      const room = `user:${userId.toString()}`
+      io.to(room).emit(event, payload)
+      console.log(`[Notification] Emitted '${event}' to ${room}`)
     }
   } catch (error) {
     console.warn(`[Notification Warning] Could not notify user ${userId}:`, error.message)
@@ -19,15 +21,22 @@ export const notifyUser = async (userId, event, payload) => {
 }
 
 /**
- * Send real-time notification to all active municipal administrators
+ * Send real-time notification to municipal administrators of a specific municipality
+ * Room format: muni:<municipalityId>:admins
+ * @param {string|ObjectId} municipalityId
  * @param {string} event
  * @param {object} payload
  */
-export const notifyAdmins = async (event, payload) => {
+export const notifyAdmins = async (municipalityId, event, payload) => {
   try {
+    if (!municipalityId) {
+      console.warn('[Notification Warning] notifyAdmins called without municipalityId')
+      return
+    }
     const io = getIO()
-    io.to('admins').emit(event, payload)
-    console.log(`[Notification] Emitted '${event}' to admins room`)
+    const room = `muni:${municipalityId.toString()}:admins`
+    io.to(room).emit(event, payload)
+    console.log(`[Notification] Emitted '${event}' to ${room}`)
   } catch (error) {
     console.warn('[Notification Warning] Could not notify admins:', error.message)
   }

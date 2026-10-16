@@ -12,19 +12,22 @@ export const SocketProvider = ({ children }) => {
   const socketRef = useRef(null)
 
   useEffect(() => {
-    if (isAuthenticated() && user) {
-      // Connect to backend Socket.io
+    const token = localStorage.getItem('token')
+
+    if (isAuthenticated() && user && token) {
+      // Connect to backend Socket.io with JWT in auth payload
       const socketUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000'
       const newSocket = io(socketUrl, {
+        auth: { token },
         transports: ['websocket', 'polling'],
       })
 
       newSocket.on('connect', () => {
-        console.log('[Socket] Connected to server, registering user:', user.id || user._id, user.role)
-        newSocket.emit('register', {
-          userId: user.id || user._id,
-          role: user.role,
-        })
+        console.log('[Socket] Connected to server with auth token for user:', user.id || user._id)
+      })
+
+      newSocket.on('connect_error', (err) => {
+        console.warn('[Socket] Connection error:', err.message)
       })
 
       // Generic notification handler

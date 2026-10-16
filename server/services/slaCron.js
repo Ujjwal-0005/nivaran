@@ -35,27 +35,32 @@ export const checkSlaEscalations = async () => {
     for (const report of breachedReports) {
       report.isEscalated = true
       report.escalatedAt = now
-      // Boost priority score by flat +50 points so escalated tickets immediately surface at the top
       report.priorityScore = (report.priorityScore || 0) + 50
       await report.save()
 
       console.log(`[SLA Escalation] Escalated ticket ${report.ticketId} (Category: ${report.category?.name || 'N/A'}, New Priority: ${report.priorityScore})`)
 
-      // Phase 8: Real-time notification to municipal administrators
+      // Real-time notification to municipal administrators of the ticket's municipality
       const { notifyAdmins } = await import('../utils/notify.js')
-      await notifyAdmins('ticket_escalated', {
-        id: report._id,
-        ticketId: report.ticketId,
-        category: report.category?.name || 'Civic Issue',
-        priorityScore: report.priorityScore,
-        slaDeadline: report.slaDeadline,
-        escalatedAt: report.escalatedAt,
-        message: `🚨 Ticket ${report.ticketId} has breached its SLA and auto-escalated (+50 Priority)`,
-      })
+      if (report.municipality) {
+        await notifyAdmins(report.municipality, 'ticket_escalated', {
+          id: report._id,
+          ticketId: report.ticketId,
+          category: report.category?.name || 'Civic Issue',
+          priorityScore: report.priorityScore,
+          slaDeadline: report.slaDeadline,
+          escalatedAt: report.escalatedAt,
+          message: `🚨 Ticket ${report.ticketId} has breached its SLA and auto-escalated (+50 Priority)`,
+        })
+      }
 
-      // Optional admin email notification fallback
+      // Admin email notification fallback scoped to this municipality
       const User = (await import('../models/User.js')).default
-      const admins = await User.find({ role: 'admin' }).select('email')
+      const admins = await User.find({
+        role: 'admin',
+        municipality: report.municipality,
+      }).select('email')
+
       const { sendEscalationEmail } = await import('../utils/sendEmail.js')
       for (const admin of admins) {
         if (admin.email) {
@@ -73,11 +78,8 @@ export const checkSlaEscalations = async () => {
 }
 
 export const initSlaCron = () => {
-  // Run once every hour at minute 0: '0 * * * *'
-  // Also runs an immediate check at server startup
   console.log('[SLA Escalation] Initializing hourly SLA escalation cron job...')
   
-  // Run startup check after a brief 5s delay so DB connection is established
   setTimeout(() => {
     checkSlaEscalations()
   }, 5000)
