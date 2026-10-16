@@ -14,44 +14,38 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
   return R * c // distance in meters
 }
 
-// Find possible duplicate report based on category, distance, and time
+// Find possible duplicate report based on category, distance, time, and municipality
 async function checkForDuplicate(newReportData) {
-  const { category, location } = newReportData
+  const { category, location, municipality } = newReportData
   const thresholdMeters = 50 // 50 meters threshold
   const maxAgeDays = 30 // 30 days time window
 
-  console.log('Checking for duplicate:', { category, location, thresholdMeters, maxAgeDays })
+  console.log('Checking for duplicate:', { category, location, municipality, thresholdMeters, maxAgeDays })
 
-  // Fetch open reports of the same category within the time window
   const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000)
-  console.log('Cutoff date:', cutoffDate)
-  
-  const openReports = await Report.find({
+
+  const query = {
     category,
-    status: { $in: ['reported', 'acknowledged', 'in_progress'] }, // Only open reports
+    status: { $in: ['reported', 'acknowledged', 'in_progress'] },
     createdAt: { $gte: cutoffDate },
-  })
+  }
 
-  console.log('Found open reports:', openReports.length)
+  // Scoped to municipality
+  if (municipality) {
+    query.municipality = municipality
+  }
 
-  const now = Date.now()
+  const openReports = await Report.find(query)
 
-  // Find the first report that matches criteria
+  console.log('Found open reports in municipality:', openReports.length)
+
   for (const report of openReports) {
-    const ageDays = (now - new Date(report.createdAt).getTime()) / (1000 * 60 * 60 * 24)
     const distance = haversineDistance(
       location.lat,
       location.lng,
       report.location.lat,
       report.location.lng
     )
-
-    console.log('Checking report:', {
-      ticketId: report.ticketId,
-      distance: distance.toFixed(2),
-      ageDays: ageDays.toFixed(2),
-      threshold: thresholdMeters
-    })
 
     if (distance <= thresholdMeters) {
       console.log('Duplicate found:', report.ticketId)

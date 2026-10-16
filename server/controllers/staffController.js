@@ -1,28 +1,33 @@
 import User from '../models/User.js'
 import Report from '../models/Report.js'
+import { scopeFilter, findInScope } from '../utils/scope.js'
 
 // GET /api/staff (admin only)
-// List all staff users with:
-// - currently assigned open tickets count
-// - total resolved tickets count
-// - average rating from resolved tickets with rating.score
+// List staff users in the admin's municipality with stats
 export const getAllStaff = async (req, res) => {
   try {
-    const staffMembers = await User.find({ role: 'staff' })
-      .populate('department', 'name')
+    const filter = scopeFilter(req)
+
+    const staffMembers = await User.find({
+      role: 'staff',
+      municipality: filter.municipality,
+    })
+      .populate('department', 'name key')
       .select('-passwordHash -otp')
       .sort({ name: 1 })
 
     const staffStats = await Promise.all(
       staffMembers.map(async (staff) => {
-        // Count open tickets currently assigned
+        // Count open tickets currently assigned in same municipality
         const openTicketsCount = await Report.countDocuments({
+          municipality: filter.municipality,
           assignedTo: staff._id,
           status: { $ne: 'resolved' },
         })
 
         // Find all resolved reports for stats
         const resolvedReports = await Report.find({
+          municipality: filter.municipality,
           assignedTo: staff._id,
           status: 'resolved',
         }).select('rating')
@@ -61,37 +66,49 @@ export const getAllStaff = async (req, res) => {
 
     res.status(200).json({ staff: staffStats })
   } catch (error) {
-    console.error('Get all staff error:', error)
-    res.status(500).json({ message: 'Server error fetching staff members' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching staff members' })
   }
 }
 
 // GET /api/staff/:id/tickets (admin only)
-// Full ticket history for an individual staff member
+// Full ticket history for an individual staff member in the same municipality
 export const getStaffTickets = async (req, res) => {
   try {
     const { id } = req.params
+    const filter = scopeFilter(req)
 
-    const staff = await User.findOne({ _id: id, role: 'staff' })
-      .populate('department', 'name')
-      .select('-passwordHash -otp')
+    const staff = await findInScope(User, req, id, [
+      { path: 'department', select: 'name key' },
+    ])
 
-    if (!staff) {
+    if (staff.role !== 'staff') {
       return res.status(404).json({ message: 'Staff member not found' })
     }
 
-    const tickets = await Report.find({ assignedTo: id })
-      .populate('category', 'name severityWeight slaHours')
-      .populate('department', 'name')
+    const tickets = await Report.find({
+      municipality: filter.municipality,
+      assignedTo: id,
+    })
+      .populate('category', 'name severityWeight slaHours departmentKey')
+      .populate('department', 'name key')
       .populate('citizen', 'name email')
       .sort({ createdAt: -1 })
 
     res.status(200).json({
-      staff,
+      staff: {
+        _id: staff._id,
+        name: staff.name,
+        email: staff.email,
+        phone: staff.phone,
+        department: staff.department,
+        isVerified: staff.isVerified,
+        createdAt: staff.createdAt,
+      },
       tickets,
     })
   } catch (error) {
-    console.error('Get staff tickets error:', error)
-    res.status(500).json({ message: 'Server error fetching staff ticket history' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching staff ticket history' })
   }
 }

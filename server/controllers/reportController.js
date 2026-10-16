@@ -1,10 +1,12 @@
 import Report from '../models/Report.js'
 import Category from '../models/Category.js'
+import Department from '../models/Department.js'
 import User from '../models/User.js'
 import { checkForDuplicate } from '../algorithms/duplicateDetection.js'
 import { calculatePriorityScore, calculateDaysOpen } from '../algorithms/priorityScoring.js'
 import imagekit from '../config/imagekit.js'
 import { toFile } from '@imagekit/nodejs'
+import { scopeFilter, findInScope } from '../utils/scope.js'
 
 // Generate unique ticket ID
 const generateTicketId = () => {
@@ -16,35 +18,48 @@ const generateTicketId = () => {
 // Submit a new report (citizen only)
 export const submitReport = async (req, res) => {
   try {
-    console.log('Submit report - req.body:', req.body)
-    console.log('Submit report - req.file:', req.file)
-
     const { category, description, lat, lng, isAnonymous, forceNew } = req.body
     const userId = req.user.userId
+    const userMunicipality = req.user.municipality
+
+    if (!userMunicipality) {
+      return res.status(403).json({ message: 'User does not belong to any municipality' })
+    }
 
     const isAnonymousBool = isAnonymous === 'true' || isAnonymous === true
     const forceNewBool = forceNew === 'true' || forceNew === true
 
-    // Validate required fields
     if (!category || !description || !lat || !lng) {
       return res.status(400).json({ message: 'Category, description, and location are required' })
     }
 
-    // Look up category to get department
-    const categoryDoc = await Category.findById(category).populate('department')
+    // Look up category
+    const categoryDoc = await Category.findById(category)
     if (!categoryDoc) {
       return res.status(404).json({ message: 'Category not found' })
     }
 
-    if (!categoryDoc.department) {
-      return res.status(400).json({ message: 'Category has no associated department' })
+    // Route to department in user's municipality by category.departmentKey
+    let targetDept = null
+    let departmentUnresolved = false
+
+    if (categoryDoc.departmentKey) {
+      targetDept = await Department.findOne({
+        municipality: userMunicipality,
+        key: categoryDoc.departmentKey,
+      })
     }
 
-    // Check for duplicate unless forceNew flag is set
+    if (!targetDept) {
+      departmentUnresolved = true
+    }
+
+    // Check for duplicate in user's municipality
     if (!forceNewBool) {
       const duplicateReport = await checkForDuplicate({
         category,
         location: { lat: parseFloat(lat), lng: parseFloat(lng) },
+        municipality: userMunicipality,
       })
 
       if (duplicateReport) {
@@ -83,41 +98,42 @@ export const submitReport = async (req, res) => {
       return res.status(500).json({ message: 'Failed to generate unique ticket ID' })
     }
 
-    // Auto-assign to a staff member from the same department
-    // Load-balance by finding staff with fewest assigned reports
-    const departmentStaff = await User.find({
-      role: 'staff',
-      department: categoryDoc.department._id,
-      isVerified: true,
-    })
-
+    // Auto-assign to staff member in target department within same municipality
     let assignedStaffId = null
-    if (departmentStaff.length > 0) {
-      // Count assigned reports for each staff member
-      const staffWithCounts = await Promise.all(
-        departmentStaff.map(async (staff) => {
-          const count = await Report.countDocuments({ assignedTo: staff._id })
-          return { staff, count }
-        })
-      )
-      // Assign to staff with fewest reports
-      staffWithCounts.sort((a, b) => a.count - b.count)
-      assignedStaffId = staffWithCounts[0].staff._id
-      console.log(`Auto-assigned to staff: ${staffWithCounts[0].staff.name} (assigned: ${staffWithCounts[0].count})`)
-    } else {
-      console.log('No staff found for department, report will be unassigned')
+    if (targetDept) {
+      const departmentStaff = await User.find({
+        role: 'staff',
+        department: targetDept._id,
+        municipality: userMunicipality,
+        isVerified: true,
+      })
+
+      if (departmentStaff.length > 0) {
+        const staffWithCounts = await Promise.all(
+          departmentStaff.map(async (staff) => {
+            const count = await Report.countDocuments({
+              municipality: userMunicipality,
+              assignedTo: staff._id,
+              status: { $ne: 'resolved' },
+            })
+            return { staff, count }
+          })
+        )
+        staffWithCounts.sort((a, b) => a.count - b.count)
+        assignedStaffId = staffWithCounts[0].staff._id
+      }
     }
 
-    // Calculate SLA deadline based on category SLA hours (default 48 hours)
     const slaHours = categoryDoc.slaHours || 48
     const slaDeadline = new Date(Date.now() + slaHours * 60 * 60 * 1000)
 
-    // Create report
     const reportData = {
       ticketId,
+      municipality: userMunicipality,
       citizen: userId,
-      category,
-      department: categoryDoc.department._id,
+      category: categoryDoc._id,
+      department: targetDept ? targetDept._id : null,
+      departmentUnresolved,
       description,
       location: { lat: parseFloat(lat), lng: parseFloat(lng) },
       isAnonymous: isAnonymousBool,
@@ -126,9 +142,7 @@ export const submitReport = async (req, res) => {
       slaDeadline,
     }
 
-    // Add photo URL if uploaded
     if (req.file) {
-      console.log('Photo uploaded, uploading to ImageKit...')
       try {
         const file = await toFile(req.file.buffer, req.file.originalname, {
           type: req.file.mimetype,
@@ -139,7 +153,6 @@ export const submitReport = async (req, res) => {
           useUniqueFileName: true,
           folder: '/nivaran/reports',
         })
-        console.log('ImageKit upload response:', uploadResponse)
         if (uploadResponse && uploadResponse.url) {
           reportData.photoUrl = uploadResponse.url
         } else {
@@ -153,7 +166,6 @@ export const submitReport = async (req, res) => {
 
     const report = await Report.create(reportData)
 
-    // Calculate initial priority score
     const daysOpen = calculateDaysOpen(report.createdAt)
     const severityWeight = categoryDoc.severityWeight || 1
     report.priorityScore = calculatePriorityScore({
@@ -164,8 +176,6 @@ export const submitReport = async (req, res) => {
     })
     await report.save()
 
-    console.log('Report created with priority score:', report.priorityScore)
-
     res.status(201).json({
       message: 'Report submitted successfully',
       ticketId: report.ticketId,
@@ -173,7 +183,8 @@ export const submitReport = async (req, res) => {
         id: report._id,
         ticketId: report.ticketId,
         category: categoryDoc.name,
-        department: categoryDoc.department.name,
+        department: targetDept ? targetDept.name : 'Unresolved Department',
+        departmentUnresolved: report.departmentUnresolved,
         description: report.description,
         photoUrl: report.photoUrl,
         location: report.location,
@@ -184,9 +195,8 @@ export const submitReport = async (req, res) => {
       },
     })
   } catch (error) {
-    console.error('Submit report error:', error)
-    console.error('Error stack:', error.stack)
-    res.status(500).json({ message: 'Server error during report submission' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error during report submission' })
   }
 }
 
@@ -196,22 +206,16 @@ export const upvoteReport = async (req, res) => {
     const { id } = req.params
     const userId = req.user.userId
 
-    const report = await Report.findById(id).populate('category')
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
+    const report = await findInScope(Report, req, id, 'category')
 
-    // Check if user already upvoted
-    if (report.upvotes.includes(userId)) {
+    if (report.upvotes.map(String).includes(userId.toString())) {
       return res.status(400).json({ message: 'You have already upvoted this report' })
     }
 
-    // Add user to upvotes array
     report.upvotes.push(userId)
 
-    // Recalculate priority score
     const daysOpen = calculateDaysOpen(report.createdAt)
-    const severityWeight = report.category.severityWeight || 1
+    const severityWeight = report.category?.severityWeight || 1
     report.priorityScore = calculatePriorityScore({
       reportCount: report.reportCount,
       severityWeight,
@@ -230,8 +234,8 @@ export const upvoteReport = async (req, res) => {
       },
     })
   } catch (error) {
-    console.error('Upvote report error:', error)
-    res.status(500).json({ message: 'Server error upvoting report' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error upvoting report' })
   }
 }
 
@@ -241,23 +245,17 @@ export const joinReport = async (req, res) => {
     const { id } = req.params
     const userId = req.user.userId
 
-    const report = await Report.findById(id).populate('category')
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
+    const report = await findInScope(Report, req, id, 'category')
 
-    // Check if user already reported this issue
-    if (report.reportedBy.includes(userId)) {
+    if (report.reportedBy.map(String).includes(userId.toString())) {
       return res.status(400).json({ message: 'You have already reported this issue' })
     }
 
-    // Add user to reportedBy array
     report.reportedBy.push(userId)
     report.reportCount += 1
 
-    // Recalculate priority score
     const daysOpen = calculateDaysOpen(report.createdAt)
-    const severityWeight = report.category.severityWeight || 1
+    const severityWeight = report.category?.severityWeight || 1
     report.priorityScore = calculatePriorityScore({
       reportCount: report.reportCount,
       severityWeight,
@@ -277,8 +275,8 @@ export const joinReport = async (req, res) => {
       },
     })
   } catch (error) {
-    console.error('Join report error:', error)
-    res.status(500).json({ message: 'Server error joining report' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error joining report' })
   }
 }
 
@@ -286,8 +284,10 @@ export const joinReport = async (req, res) => {
 export const getMyReports = async (req, res) => {
   try {
     const userId = req.user.userId
+    const filter = scopeFilter(req)
 
     const reports = await Report.find({
+      ...filter,
       $or: [
         { citizen: userId },
         { reportedBy: userId },
@@ -298,8 +298,7 @@ export const getMyReports = async (req, res) => {
       .populate('citizen', 'name email')
       .sort({ createdAt: -1 })
 
-    // Recalculate priority scores for all reports
-    const reportsWithPriority = reports.map(report => {
+    const reportsWithPriority = reports.map((report) => {
       const daysOpen = calculateDaysOpen(report.createdAt)
       const severityWeight = report.category?.severityWeight || 1
       const priorityScore = calculatePriorityScore({
@@ -308,8 +307,6 @@ export const getMyReports = async (req, res) => {
         daysOpen,
         upvotes: report.upvotes.length,
       })
-
-      // Update the report object with calculated priority
       const reportObj = report.toObject()
       reportObj.priorityScore = priorityScore
       return reportObj
@@ -317,29 +314,26 @@ export const getMyReports = async (req, res) => {
 
     res.status(200).json({ reports: reportsWithPriority })
   } catch (error) {
-    console.error('Get my reports error:', error)
-    res.status(500).json({ message: 'Server error fetching reports' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching reports' })
   }
 }
 
-// Get single report by ID
+// Get single report by ID (scoped: callers can only read reports in their municipality)
+// Citizens can see another citizen's report details without reporter identity if anonymous
 export const getReportById = async (req, res) => {
   try {
     const { id } = req.params
 
-    const report = await Report.findById(id)
-      .populate('category')
-      .populate('department')
-      .populate('citizen', 'name email')
-      .populate('reportedBy', 'name email')
-      .populate('assignedTo', 'name email department')
-      .populate('comments.author', 'name role')
+    const report = await findInScope(Report, req, id, [
+      { path: 'category' },
+      { path: 'department' },
+      { path: 'citizen', select: 'name email' },
+      { path: 'reportedBy', select: 'name email' },
+      { path: 'assignedTo', select: 'name email department' },
+      { path: 'comments.author', select: 'name role' },
+    ])
 
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
-
-    // Recalculate priority score
     const daysOpen = calculateDaysOpen(report.createdAt)
     const severityWeight = report.category?.severityWeight || 1
     const priorityScore = calculatePriorityScore({
@@ -352,14 +346,27 @@ export const getReportById = async (req, res) => {
     const reportObj = report.toObject()
     reportObj.priorityScore = priorityScore
 
+    // If caller is another citizen and report is anonymous or not the reporter, sanitize reporter identity
+    const isOwner = req.user.role === 'citizen' && (
+      (report.citizen && report.citizen._id.toString() === req.user.userId.toString()) ||
+      report.reportedBy?.some((u) => u._id.toString() === req.user.userId.toString())
+    )
+
+    if (req.user.role === 'citizen' && !isOwner) {
+      if (reportObj.isAnonymous) {
+        reportObj.citizen = null
+        reportObj.reportedBy = []
+      }
+    }
+
     res.status(200).json({ report: reportObj })
   } catch (error) {
-    console.error('Get report by ID error:', error)
-    res.status(500).json({ message: 'Server error fetching report' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching report' })
   }
 }
 
-// Add a comment to a report (any logged-in role)
+// Add a comment to a report (any logged-in role in same municipality)
 export const addComment = async (req, res) => {
   try {
     const { id } = req.params
@@ -371,10 +378,7 @@ export const addComment = async (req, res) => {
       return res.status(400).json({ message: 'Comment text is required' })
     }
 
-    const report = await Report.findById(id)
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
+    const report = await findInScope(Report, req, id)
 
     const comment = {
       author: userId,
@@ -386,13 +390,11 @@ export const addComment = async (req, res) => {
     report.comments.push(comment)
     await report.save()
 
-    // Re-fetch with populated author for the response
     const updatedReport = await Report.findById(id)
       .populate('category', 'name')
       .populate('comments.author', 'name role')
     const newComment = updatedReport.comments[updatedReport.comments.length - 1]
 
-    // Phase 8: Notification routing for new comment
     const { notifyUser, notifyAdmins } = await import('../utils/notify.js')
     const commentPayload = {
       reportId: report._id,
@@ -405,19 +407,17 @@ export const addComment = async (req, res) => {
     }
 
     if (userRole === 'citizen') {
-      // Citizen commented -> notify assigned staff if any, and notify admins
       if (report.assignedTo) {
         notifyUser(report.assignedTo, 'new_comment', commentPayload)
       }
-      notifyAdmins('new_comment', commentPayload)
+      notifyAdmins(report.municipality, 'new_comment', commentPayload)
     } else {
-      // Staff or Admin commented -> notify all citizen reporters
       const reporterIds = (report.reportedBy || []).map((u) => u.toString())
       if (report.citizen && !reporterIds.includes(report.citizen.toString())) {
         reporterIds.push(report.citizen.toString())
       }
       for (const repId of reporterIds) {
-        if (repId !== userId) {
+        if (repId !== userId.toString()) {
           notifyUser(repId, 'new_comment', commentPayload)
         }
       }
@@ -428,8 +428,8 @@ export const addComment = async (req, res) => {
       comment: newComment,
     })
   } catch (error) {
-    console.error('Add comment error:', error)
-    res.status(500).json({ message: 'Server error adding comment' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error adding comment' })
   }
 }
 
@@ -440,28 +440,21 @@ export const rateReport = async (req, res) => {
     const { score, feedback } = req.body
     const userId = req.user.userId
 
-    // Validate score
     const scoreNum = parseInt(score, 10)
     if (!scoreNum || scoreNum < 1 || scoreNum > 5) {
       return res.status(400).json({ message: 'Score must be a number between 1 and 5' })
     }
 
-    const report = await Report.findById(id)
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
+    const report = await findInScope(Report, req, id)
 
-    // Only the original citizen can rate
-    if (report.citizen.toString() !== userId) {
+    if (report.citizen.toString() !== userId.toString()) {
       return res.status(403).json({ message: 'Only the report author can rate this report' })
     }
 
-    // Must be resolved
     if (report.status !== 'resolved') {
       return res.status(400).json({ message: 'You can only rate a resolved report' })
     }
 
-    // Block duplicate rating
     if (report.rating && report.rating.score) {
       return res.status(400).json({ message: 'You have already rated this report' })
     }
@@ -474,8 +467,8 @@ export const rateReport = async (req, res) => {
       rating: report.rating,
     })
   } catch (error) {
-    console.error('Rate report error:', error)
-    res.status(500).json({ message: 'Server error submitting rating' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error submitting rating' })
   }
 }
 
@@ -490,22 +483,16 @@ export const disputeReport = async (req, res) => {
       return res.status(400).json({ message: 'Dispute reason is required' })
     }
 
-    const report = await Report.findById(id)
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
+    const report = await findInScope(Report, req, id)
 
-    // Only the original citizen can dispute
-    if (report.citizen.toString() !== userId) {
+    if (report.citizen.toString() !== userId.toString()) {
       return res.status(403).json({ message: 'Only the report author can dispute this report' })
     }
 
-    // Must be resolved to dispute
     if (report.status !== 'resolved') {
       return res.status(400).json({ message: 'You can only dispute a resolved report' })
     }
 
-    // Prevent disputing again
     if (report.isDisputed) {
       return res.status(400).json({ message: 'This report has already been disputed' })
     }
@@ -515,7 +502,6 @@ export const disputeReport = async (req, res) => {
     report.status = 'disputed'
     await report.save()
 
-    // Notify admins about the dispute
     const { notifyAdmins } = await import('../utils/notify.js')
     const disputePayload = {
       reportId: report._id,
@@ -525,7 +511,7 @@ export const disputeReport = async (req, res) => {
       disputeReason: reason.trim(),
       message: `Citizen disputed resolution for ${report.ticketId}: "${reason.trim().substring(0, 60)}${reason.trim().length > 60 ? '...' : ''}"`,
     }
-    notifyAdmins('dispute_created', disputePayload)
+    notifyAdmins(report.municipality, 'dispute_created', disputePayload)
 
     res.status(200).json({
       message: 'Dispute submitted. The municipal admin will review this report.',
@@ -533,15 +519,16 @@ export const disputeReport = async (req, res) => {
       isDisputed: report.isDisputed,
     })
   } catch (error) {
-    console.error('Dispute report error:', error)
-    res.status(500).json({ message: 'Server error submitting dispute' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error submitting dispute' })
   }
 }
 
-// Get nearby open reports (any logged-in user)
+// Get nearby open reports in the same municipality (any logged-in user)
 export const getNearbyReports = async (req, res) => {
   try {
     const { lat, lng, radius } = req.query
+    const filter = scopeFilter(req)
 
     if (!lat || !lng) {
       return res.status(400).json({ message: 'lat and lng query parameters are required' })
@@ -555,18 +542,17 @@ export const getNearbyReports = async (req, res) => {
       return res.status(400).json({ message: 'Invalid lat/lng values' })
     }
 
-    // Fetch all open reports (not resolved or disputed)
     const openReports = await Report.find({
+      ...filter,
       status: { $in: ['reported', 'acknowledged', 'in_progress'] },
     })
       .populate('category', 'name severityWeight')
       .select('-citizen -reportedBy -comments -rating -disputeReason')
 
-    // Filter by haversine distance in-memory
     const { haversineDistance } = await import('../algorithms/duplicateDetection.js')
 
     const nearbyReports = openReports
-      .map(report => {
+      .map((report) => {
         const distance = haversineDistance(
           userLat,
           userLng,
@@ -608,29 +594,28 @@ export const getNearbyReports = async (req, res) => {
       reports: nearbyReports,
     })
   } catch (error) {
-    console.error('Get nearby reports error:', error)
-    res.status(500).json({ message: 'Server error fetching nearby reports' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching nearby reports' })
   }
 }
 
-// ─────────────────────────────────────────────
-// Phase 6 — Staff endpoints
-// ─────────────────────────────────────────────
-
-// Get staff's assigned tickets sorted by priority (staff only)
+// Get staff's assigned tickets (staff only, in staff's municipality)
 export const getAssignedReports = async (req, res) => {
   try {
     const staffId = req.user.userId
+    const filter = scopeFilter(req)
 
-    const reports = await Report.find({ assignedTo: staffId })
+    const reports = await Report.find({
+      ...filter,
+      assignedTo: staffId,
+    })
       .populate('category', 'name severityWeight')
       .populate('department', 'name')
       .populate('citizen', 'name email')
       .populate('assignedTo', 'name email')
       .sort({ priorityScore: -1 })
 
-    // Recalculate live priority scores before responding
-    const reportsWithPriority = reports.map(report => {
+    const reportsWithPriority = reports.map((report) => {
       const daysOpen = calculateDaysOpen(report.createdAt)
       const severityWeight = report.category?.severityWeight || 1
       const priorityScore = calculatePriorityScore({
@@ -646,28 +631,32 @@ export const getAssignedReports = async (req, res) => {
 
     res.status(200).json({ reports: reportsWithPriority })
   } catch (error) {
-    console.error('Get assigned reports error:', error)
-    res.status(500).json({ message: 'Server error fetching assigned reports' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching assigned reports' })
   }
 }
 
-// Get all reports in staff's department (staff only)
+// Get all reports in staff's department (staff only, in same municipality)
 export const getDepartmentReports = async (req, res) => {
   try {
-    const staff = await User.findById(req.user.userId)
+    const filter = scopeFilter(req)
+    const staff = await findInScope(User, req, req.user.userId)
+
     if (!staff || !staff.department) {
       return res.status(400).json({ message: 'Staff must be assigned to a department' })
     }
 
-    const reports = await Report.find({ department: staff.department })
+    const reports = await Report.find({
+      ...filter,
+      department: staff.department,
+    })
       .populate('category', 'name severityWeight')
       .populate('department', 'name')
       .populate('citizen', 'name email')
       .populate('assignedTo', 'name email')
       .sort({ priorityScore: -1 })
 
-    // Recalculate live priority scores before responding
-    const reportsWithPriority = reports.map(report => {
+    const reportsWithPriority = reports.map((report) => {
       const daysOpen = calculateDaysOpen(report.createdAt)
       const severityWeight = report.category?.severityWeight || 1
       const priorityScore = calculatePriorityScore({
@@ -683,21 +672,18 @@ export const getDepartmentReports = async (req, res) => {
 
     res.status(200).json({ reports: reportsWithPriority })
   } catch (error) {
-    console.error('Get department reports error:', error)
-    res.status(500).json({ message: 'Server error fetching department reports' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching department reports' })
   }
 }
 
-// Update report status (staff only, must be assigned to this report)
-// Supports: acknowledged → in_progress → resolved
-// Resolving requires resolutionNote + after-photo (resolutionPhotoUrl)
+// Update report status (staff only, must be assigned to this report and in same municipality)
 export const updateStatus = async (req, res) => {
   try {
     const { id } = req.params
     const { status, resolutionNote } = req.body
     const staffId = req.user.userId
 
-    // Valid statuses staff can set
     const ALLOWED_STATUSES = ['acknowledged', 'in_progress', 'resolved']
     if (!ALLOWED_STATUSES.includes(status)) {
       return res.status(400).json({
@@ -705,20 +691,15 @@ export const updateStatus = async (req, res) => {
       })
     }
 
-    const report = await Report.findById(id).populate('category', 'severityWeight')
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
+    const report = await findInScope(Report, req, id, { path: 'category', select: 'severityWeight' })
 
-    // Security: staff must be in the same department as the report
-    const staff = await User.findById(staffId)
-    if (!staff || !staff.department || staff.department.toString() !== report.department.toString()) {
+    const staff = await findInScope(User, req, staffId)
+    if (!staff || !staff.department || !report.department || staff.department.toString() !== report.department.toString()) {
       return res.status(403).json({
         message: 'You are not in the same department as this report and cannot update its status',
       })
     }
 
-    // Enforce valid forward-only transitions
     const TRANSITIONS = {
       reported: ['acknowledged'],
       acknowledged: ['in_progress'],
@@ -731,7 +712,6 @@ export const updateStatus = async (req, res) => {
       })
     }
 
-    // Resolving requires an after-photo and a resolution note
     if (status === 'resolved') {
       if (!resolutionNote || !resolutionNote.trim()) {
         return res.status(400).json({ message: 'A resolution note is required when marking a report as resolved' })
@@ -741,7 +721,6 @@ export const updateStatus = async (req, res) => {
         return res.status(400).json({ message: 'An after-photo is required when marking a report as resolved' })
       }
 
-      // Upload after-photo to ImageKit
       try {
         const file = await toFile(req.file.buffer, req.file.originalname, {
           type: req.file.mimetype,
@@ -769,7 +748,6 @@ export const updateStatus = async (req, res) => {
 
     report.status = status
 
-    // Recalculate priority score after status change
     const daysOpen = calculateDaysOpen(report.createdAt)
     const severityWeight = report.category?.severityWeight || 1
     report.priorityScore = calculatePriorityScore({
@@ -781,11 +759,9 @@ export const updateStatus = async (req, res) => {
 
     await report.save()
 
-    // Phase 8: Real-time and Email Notifications to all citizens who reported this ticket
     const { notifyUser } = await import('../utils/notify.js')
     const { sendStatusUpdateEmail, sendResolvedEmail } = await import('../utils/sendEmail.js')
 
-    // Aggregate all unique reporters
     const reporterUserIds = (report.reportedBy || []).map((u) => u.toString())
     if (report.citizen && !reporterUserIds.includes(report.citizen.toString())) {
       reporterUserIds.push(report.citizen.toString())
@@ -804,14 +780,11 @@ export const updateStatus = async (req, res) => {
       message: `Status update: Report ${report.ticketId} is now ${status.toUpperCase().replace('_', ' ')}`,
     }
 
-    // Fetch user details to get email addresses
     const reporterDocs = await User.find({ _id: { $in: reporterUserIds } }).select('email name')
 
     for (const reporter of reporterDocs) {
-      // 1. Emit Socket.io real-time event to user room
       notifyUser(reporter._id, 'status_update', statusPayload)
 
-      // 2. Send email notification fallback
       if (reporter.email) {
         if (status === 'resolved') {
           sendResolvedEmail(reporter.email, {
@@ -843,19 +816,17 @@ export const updateStatus = async (req, res) => {
       },
     })
   } catch (error) {
-    console.error('Update status error:', error)
-    res.status(500).json({ message: 'Server error updating report status' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error updating report status' })
   }
 }
 
-// ── Phase 7: Admin Controllers ──────────────────────────────────────────────
-
-// GET /api/reports (admin only)
-// Supports filters: ?status=, ?department=, ?category=, ?escalated=true
+// GET /api/reports (admin only, scoped to admin's municipality)
+// If departmentUnresolved is present, surfaces those first
 export const getAllReports = async (req, res) => {
   try {
     const { status, department, category, escalated } = req.query
-    const filter = {}
+    const filter = scopeFilter(req)
 
     if (status) {
       filter.status = status
@@ -872,14 +843,14 @@ export const getAllReports = async (req, res) => {
       filter.isEscalated = false
     }
 
+    // Sort unresolved departments to the top, then by priority score and createdAt
     const reports = await Report.find(filter)
-      .populate('category', 'name severityWeight slaHours')
-      .populate('department', 'name')
+      .populate('category', 'name severityWeight slaHours departmentKey')
+      .populate('department', 'name key')
       .populate('citizen', 'name email')
       .populate('assignedTo', 'name email')
-      .sort({ priorityScore: -1, createdAt: -1 })
+      .sort({ departmentUnresolved: -1, priorityScore: -1, createdAt: -1 })
 
-    // Dynamically calculate and update daysOpen and priorityScore for up-to-date sorting
     const enrichedReports = reports.map((r) => {
       const daysOpen = calculateDaysOpen(r.createdAt)
       const severityWeight = r.category?.severityWeight || 1
@@ -901,55 +872,52 @@ export const getAllReports = async (req, res) => {
 
     res.status(200).json({ reports: enrichedReports })
   } catch (error) {
-    console.error('Get all reports error:', error)
-    res.status(500).json({ message: 'Server error fetching reports' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching reports' })
   }
 }
 
-// PATCH /api/reports/:id/assign (admin only)
-// Body: { staffId } OR auto-assign least-loaded staff in department
+// PATCH /api/reports/:id/assign (admin only, scoped to municipality)
 export const assignReport = async (req, res) => {
   try {
     const { id } = req.params
     const { staffId } = req.body
+    const filter = scopeFilter(req)
 
-    const report = await Report.findById(id).populate('category department')
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
+    const report = await findInScope(Report, req, id, 'category department')
 
     let targetStaff = null
 
     if (staffId) {
-      // Manual assignment
-      targetStaff = await User.findOne({
-        _id: staffId,
-        role: 'staff',
-        isVerified: true,
-      })
-      if (!targetStaff) {
-        return res.status(404).json({ message: 'Selected staff member not found or invalid' })
+      targetStaff = await findInScope(User, req, staffId)
+      if (targetStaff.role !== 'staff' || !targetStaff.isVerified) {
+        return res.status(400).json({ message: 'Selected staff member is not valid or not verified' })
       }
     } else {
-      // Auto-assign using load balancing:
-      // Find staff in the report's department with fewest open assigned tickets
       const deptId = report.department?._id || report.department
+      if (!deptId) {
+        return res.status(400).json({
+          message: 'Cannot auto-assign: Ticket has unresolved department. Please assign manually or resolve department.',
+        })
+      }
+
       const deptStaff = await User.find({
         role: 'staff',
         department: deptId,
+        municipality: filter.municipality,
         isVerified: true,
       })
 
       if (!deptStaff || deptStaff.length === 0) {
         return res.status(400).json({
-          message: 'No verified staff members found in this department for auto-assignment',
+          message: 'No verified staff members found in this department for auto-assignment in your municipality',
         })
       }
 
-      // Count open assigned tickets for each staff member
       const staffWorkloads = await Promise.all(
         deptStaff.map(async (staff) => {
           const openCount = await Report.countDocuments({
+            municipality: filter.municipality,
             assignedTo: staff._id,
             status: { $ne: 'resolved' },
           })
@@ -962,7 +930,6 @@ export const assignReport = async (req, res) => {
     }
 
     report.assignedTo = targetStaff._id
-    // Update status to 'acknowledged' if it was 'reported'
     if (report.status === 'reported') {
       report.status = 'acknowledged'
     }
@@ -974,7 +941,6 @@ export const assignReport = async (req, res) => {
       .populate('department', 'name')
       .populate('assignedTo', 'name email')
 
-    // Phase 8: Real-time notification to assigned staff member
     const { notifyUser } = await import('../utils/notify.js')
     notifyUser(targetStaff._id, 'new_assignment', {
       reportId: populated._id,
@@ -992,15 +958,16 @@ export const assignReport = async (req, res) => {
       report: populated,
     })
   } catch (error) {
-    console.error('Assign report error:', error)
-    res.status(500).json({ message: 'Server error assigning report' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error assigning report' })
   }
 }
 
-// GET /api/reports/disputed (admin only)
+// GET /api/reports/disputed (admin only, scoped to municipality)
 export const getDisputedReports = async (req, res) => {
   try {
-    const disputedReports = await Report.find({ status: 'disputed' })
+    const filter = scopeFilter(req)
+    const disputedReports = await Report.find({ ...filter, status: 'disputed' })
       .populate('category', 'name severityWeight slaHours')
       .populate('department', 'name')
       .populate('citizen', 'name email')
@@ -1009,13 +976,12 @@ export const getDisputedReports = async (req, res) => {
 
     res.status(200).json({ reports: disputedReports })
   } catch (error) {
-    console.error('Get disputed reports error:', error)
-    res.status(500).json({ message: 'Server error fetching disputed reports' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching disputed reports' })
   }
 }
 
-// PATCH /api/reports/:id/resolve-dispute (admin only)
-// Body: { action: 'reassign' | 'mark_resolved' | 'escalate_further', note, staffId }
+// PATCH /api/reports/:id/resolve-dispute (admin only, scoped to municipality)
 export const resolveDispute = async (req, res) => {
   try {
     const { id } = req.params
@@ -1028,30 +994,24 @@ export const resolveDispute = async (req, res) => {
       })
     }
 
-    const report = await Report.findById(id).populate('category department')
-    if (!report) {
-      return res.status(404).json({ message: 'Report not found' })
-    }
+    const report = await findInScope(Report, req, id, 'category department')
 
     if (report.status !== 'disputed' && !report.isDisputed) {
       return res.status(400).json({ message: 'Report is not currently marked as disputed' })
     }
 
-
     if (action === 'reassign') {
-      // Reopen ticket to in_progress
       report.status = 'in_progress'
       report.isDisputed = false
       report.resolvedAt = null
 
       if (staffId) {
-        const staffExists = await User.findById(staffId)
+        const staffExists = await findInScope(User, req, staffId)
         if (staffExists) {
           report.assignedTo = staffId
         }
       }
 
-      // Add audit comment
       report.comments.push({
         author: adminUser.userId,
         authorRole: 'admin',
@@ -1059,7 +1019,6 @@ export const resolveDispute = async (req, res) => {
         createdAt: new Date(),
       })
     } else if (action === 'mark_resolved') {
-      // Admin overrides citizen dispute and confirms resolved
       report.status = 'resolved'
       report.isDisputed = false
       if (!report.resolvedAt) {
@@ -1073,7 +1032,6 @@ export const resolveDispute = async (req, res) => {
         createdAt: new Date(),
       })
     } else if (action === 'escalate_further') {
-      // Remains disputed, flagged for higher municipal review
       report.isEscalated = true
       report.escalatedAt = new Date()
 
@@ -1087,14 +1045,13 @@ export const resolveDispute = async (req, res) => {
 
     await report.save()
 
-    // Notify the citizen about dispute resolution
     const { notifyUser } = await import('../utils/notify.js')
     const resolutionPayload = {
       reportId: report._id,
       ticketId: report.ticketId,
       category: report.category?.name || 'Civic Issue',
       action,
-      note: note.trim(),
+      note: (note || '').trim(),
       message: `Admin ${action === 'reassign' ? 'reopened' : action === 'mark_resolved' ? 'confirmed resolution' : 'escalated'} your dispute for ${report.ticketId}`,
     }
     notifyUser(report.citizen, 'dispute_resolved', resolutionPayload)
@@ -1111,8 +1068,7 @@ export const resolveDispute = async (req, res) => {
       report: updated,
     })
   } catch (error) {
-    console.error('Resolve dispute error:', error)
-    res.status(500).json({ message: 'Server error processing dispute resolution' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error processing dispute resolution' })
   }
 }
-

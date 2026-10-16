@@ -2,19 +2,22 @@ import Report from '../models/Report.js'
 import Department from '../models/Department.js'
 import Category from '../models/Category.js'
 import User from '../models/User.js'
+import Municipality from '../models/Municipality.js'
+import { scopeFilter } from '../utils/scope.js'
 
 /**
  * 1. GET /api/analytics/overview (admin only)
- * Returns: total reports, resolved count, open count, average resolution time (hours)
+ * Scoped to admin's municipality
  */
 export const getOverviewAnalytics = async (req, res) => {
   try {
-    const totalReports = await Report.countDocuments()
-    const resolvedReportsCount = await Report.countDocuments({ status: 'resolved' })
+    const filter = scopeFilter(req)
+    const totalReports = await Report.countDocuments(filter)
+    const resolvedReportsCount = await Report.countDocuments({ ...filter, status: 'resolved' })
     const openReportsCount = totalReports - resolvedReportsCount
 
     // Average resolution time (hours) for resolved reports
-    const resolvedReports = await Report.find({ status: 'resolved' }).select('createdAt resolvedAt updatedAt')
+    const resolvedReports = await Report.find({ ...filter, status: 'resolved' }).select('createdAt resolvedAt updatedAt')
 
     let totalResolutionHours = 0
     let validResolvedCount = 0
@@ -41,19 +44,20 @@ export const getOverviewAnalytics = async (req, res) => {
       avgResolutionHours,
     })
   } catch (error) {
-    console.error('Error fetching analytics overview:', error)
-    res.status(500).json({ message: 'Server error fetching analytics overview' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching analytics overview' })
   }
 }
 
 /**
  * 2. GET /api/analytics/by-category (admin only)
- * Count of reports grouped by category
+ * Count of reports grouped by category in this municipality
  */
 export const getCategoryAnalytics = async (req, res) => {
   try {
+    const filter = scopeFilter(req)
     const categories = await Category.find().select('name')
-    const reports = await Report.find().select('category status')
+    const reports = await Report.find(filter).select('category status')
 
     const categoryMap = {}
     categories.forEach((cat) => {
@@ -83,19 +87,20 @@ export const getCategoryAnalytics = async (req, res) => {
     const result = Object.values(categoryMap).sort((a, b) => b.total - a.total)
     res.status(200).json({ categories: result })
   } catch (error) {
-    console.error('Error fetching category analytics:', error)
-    res.status(500).json({ message: 'Server error fetching category analytics' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching category analytics' })
   }
 }
 
 /**
  * 3. GET /api/analytics/by-department (admin only)
- * For each department: total reports, resolved count, average resolution time, average citizen rating, dispute rate
+ * Departments in this municipality
  */
 export const getDepartmentAnalytics = async (req, res) => {
   try {
-    const departments = await Department.find().select('name')
-    const reports = await Report.find().select('department status createdAt resolvedAt updatedAt rating isDisputed')
+    const filter = scopeFilter(req)
+    const departments = await Department.find(filter).select('name')
+    const reports = await Report.find(filter).select('department status createdAt resolvedAt updatedAt rating isDisputed')
 
     const deptMap = {}
     departments.forEach((d) => {
@@ -172,23 +177,23 @@ export const getDepartmentAnalytics = async (req, res) => {
 
     res.status(200).json({ departments: result })
   } catch (error) {
-    console.error('Error fetching department analytics:', error)
-    res.status(500).json({ message: 'Server error fetching department analytics' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching department analytics' })
   }
 }
 
 /**
  * 4. GET /api/analytics/trends (admin only)
- * Reports created vs resolved per day over the last 30 days
+ * Reports in municipality created vs resolved per day over the last 30 days
  */
 export const getTrendAnalytics = async (req, res) => {
   try {
+    const filter = scopeFilter(req)
     const days = 30
     const now = new Date()
     const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
     startDate.setHours(0, 0, 0, 0)
 
-    // Generate array of 30 date strings 'YYYY-MM-DD'
     const trendMap = {}
     for (let i = 0; i <= days; i++) {
       const d = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000)
@@ -201,6 +206,7 @@ export const getTrendAnalytics = async (req, res) => {
     }
 
     const reports = await Report.find({
+      ...filter,
       $or: [
         { createdAt: { $gte: startDate } },
         { resolvedAt: { $gte: startDate } },
@@ -230,24 +236,26 @@ export const getTrendAnalytics = async (req, res) => {
     const trends = Object.values(trendMap).sort((a, b) => a.date.localeCompare(b.date))
     res.status(200).json({ trends })
   } catch (error) {
-    console.error('Error fetching trends analytics:', error)
-    res.status(500).json({ message: 'Server error fetching trend analytics' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching trend analytics' })
   }
 }
 
 /**
  * 5. GET /api/analytics/staff-leaderboard (admin only)
- * Staff ranked by tickets resolved and average citizen rating
+ * Staff within admin's municipality ranked
  */
 export const getStaffLeaderboard = async (req, res) => {
   try {
-    const staffMembers = await User.find({ role: 'staff' })
+    const filter = scopeFilter(req)
+    const staffMembers = await User.find({ role: 'staff', municipality: filter.municipality })
       .populate('department', 'name')
       .select('name email department')
 
     const leaderboard = await Promise.all(
       staffMembers.map(async (staff) => {
         const resolvedReports = await Report.find({
+          municipality: filter.municipality,
           assignedTo: staff._id,
           status: 'resolved',
         }).select('rating')
@@ -259,6 +267,7 @@ export const getStaffLeaderboard = async (req, res) => {
           : null
 
         const openAssigned = await Report.countDocuments({
+          municipality: filter.municipality,
           assignedTo: staff._id,
           status: { $ne: 'resolved' },
         })
@@ -277,18 +286,19 @@ export const getStaffLeaderboard = async (req, res) => {
     leaderboard.sort((a, b) => b.totalResolved - a.totalResolved || (b.avgRating || 0) - (a.avgRating || 0))
     res.status(200).json({ leaderboard })
   } catch (error) {
-    console.error('Error fetching staff leaderboard:', error)
-    res.status(500).json({ message: 'Server error fetching staff leaderboard' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching staff leaderboard' })
   }
 }
 
 /**
  * 6. GET /api/analytics/zones (admin only)
- * Group reports by bucketing lat/lng to ~2 decimal places to approximate zones
+ * Group reports in municipality by lat/lng bucket
  */
 export const getZoneAnalytics = async (req, res) => {
   try {
-    const openReports = await Report.find({ status: { $ne: 'resolved' } })
+    const filter = scopeFilter(req)
+    const openReports = await Report.find({ ...filter, status: { $ne: 'resolved' } })
       .populate('department', 'name')
       .select('location status ticketId')
 
@@ -296,7 +306,6 @@ export const getZoneAnalytics = async (req, res) => {
 
     openReports.forEach((r) => {
       if (r.location?.lat && r.location?.lng) {
-        // Round to 2 decimal places (~1.1km grid bucket)
         const latBucket = r.location.lat.toFixed(2)
         const lngBucket = r.location.lng.toFixed(2)
         const zoneKey = `Sector ${latBucket}, ${lngBucket}`
@@ -319,19 +328,29 @@ export const getZoneAnalytics = async (req, res) => {
     const zones = Object.values(zoneMap).sort((a, b) => b.openCount - a.openCount)
     res.status(200).json({ zones })
   } catch (error) {
-    console.error('Error fetching zone analytics:', error)
-    res.status(500).json({ message: 'Server error fetching zone analytics' })
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching zone analytics' })
   }
 }
 
 /**
  * 7. GET /api/public/transparency (NO AUTH REQUIRED)
- * Aggregate, strictly non-personal municipal performance metrics
+ * Public transparency. Optional ?municipality=... query parameter, defaults to first active municipality or all.
  */
 export const getPublicTransparency = async (req, res) => {
   try {
-    const departments = await Department.find().select('name description')
-    const reports = await Report.find().select('department status createdAt resolvedAt updatedAt')
+    let muniFilter = {}
+    if (req.query.municipality) {
+      muniFilter.municipality = req.query.municipality
+    } else {
+      const defaultMuni = await Municipality.findOne({ isActive: true }).sort({ name: 1 })
+      if (defaultMuni) {
+        muniFilter.municipality = defaultMuni._id
+      }
+    }
+
+    const departments = await Department.find(muniFilter).select('name description')
+    const reports = await Report.find(muniFilter).select('department status createdAt resolvedAt updatedAt')
 
     const deptMap = {}
     departments.forEach((d) => {

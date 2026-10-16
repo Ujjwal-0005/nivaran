@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken'
+import User from '../models/User.js'
 
-export const auth = (req, res, next) => {
+export const auth = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization
 
@@ -12,9 +13,27 @@ export const auth = (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
 
+    // Load user from database to verify status, municipality, and tokenVersion
+    const user = await User.findById(decoded.userId)
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' })
+    }
+
+    // Check tokenVersion (defaults to 0 if missing in old tokens or db)
+    const tokenVersionInToken = decoded.tokenVersion ?? 0
+    const userTokenVersion = user.tokenVersion ?? 0
+    if (tokenVersionInToken !== userTokenVersion) {
+      return res.status(401).json({ message: 'Session expired, please login again' })
+    }
+
     req.user = {
-      userId: decoded.userId,
-      role: decoded.role,
+      _id: user._id,
+      userId: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      municipality: user.municipality || null,
+      department: user.department || null,
     }
 
     next()
