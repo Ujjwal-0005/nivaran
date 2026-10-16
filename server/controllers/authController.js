@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
+import Municipality from '../models/Municipality.js'
 import { sendOTPEmail, sendWelcomeEmail } from '../utils/sendEmail.js'
 
 // Generate 6-digit OTP
@@ -8,10 +9,15 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString()
 }
 
-// Generate JWT token
-const generateToken = (userId, role) => {
+// Generate JWT token with tokenVersion
+const generateToken = (user) => {
   return jwt.sign(
-    { userId, role },
+    {
+      userId: user._id,
+      role: user.role,
+      municipality: user.municipality || null,
+      tokenVersion: user.tokenVersion ?? 0,
+    },
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
   )
@@ -20,7 +26,17 @@ const generateToken = (userId, role) => {
 // Register (Citizen only)
 export const register = async (req, res) => {
   try {
-    const { name, email, password, phone, state, city } = req.body
+    const { name, email, password, phone, state, city, municipality, homeAddress } = req.body
+
+    // Validate municipality is required for citizen
+    if (!municipality) {
+      return res.status(400).json({ message: 'City/Municipality selection is required' })
+    }
+
+    const muniDoc = await Municipality.findOne({ _id: municipality, isActive: true })
+    if (!muniDoc) {
+      return res.status(400).json({ message: 'Invalid or inactive municipality selected' })
+    }
 
     // Validate phone format (Indian format: +91XXXXXXXXXX) if provided
     if (phone && phone.trim() !== '') {
@@ -50,12 +66,21 @@ export const register = async (req, res) => {
       email,
       passwordHash,
       role: 'citizen',
-      state,
-      city,
+      municipality: muniDoc._id,
+      state: muniDoc.state || state,
+      city: muniDoc.name || city,
       otp,
       otpExpiry,
       lastOtpSentAt,
       isVerified: false,
+    }
+
+    if (homeAddress && typeof homeAddress === 'object') {
+      userData.homeAddress = {
+        text: homeAddress.text || '',
+        lat: typeof homeAddress.lat === 'number' ? homeAddress.lat : null,
+        lng: typeof homeAddress.lng === 'number' ? homeAddress.lng : null,
+      }
     }
 
     if (phone && phone.trim() !== '') {
@@ -82,7 +107,7 @@ export const verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body
 
-    const user = await User.findOne({ email })
+    const user = await User.findOne({ email }).populate('municipality')
     if (!user) {
       return res.status(404).json({ message: 'User not found' })
     }
@@ -108,7 +133,7 @@ export const verifyOTP = async (req, res) => {
     await sendWelcomeEmail(email, user.name)
 
     // Generate JWT
-    const token = generateToken(user._id, user.role)
+    const token = generateToken(user)
 
     res.status(200).json({
       message: 'Email verified successfully',
@@ -118,6 +143,8 @@ export const verifyOTP = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        municipality: user.municipality,
+        homeAddress: user.homeAddress,
       },
     })
   } catch (error) {
@@ -172,7 +199,7 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body
 
-    const user = await User.findOne({ email })
+    const user = await User.findOne({ email }).populate('municipality')
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' })
     }
@@ -192,7 +219,7 @@ export const login = async (req, res) => {
     }
 
     // Generate JWT
-    const token = generateToken(user._id, user.role)
+    const token = generateToken(user)
 
     res.status(200).json({
       message: 'Login successful',
@@ -202,6 +229,9 @@ export const login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        municipality: user.municipality,
+        homeAddress: user.homeAddress,
+        department: user.department,
       },
     })
   } catch (error) {

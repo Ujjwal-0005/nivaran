@@ -78,10 +78,13 @@ function AdminDepartments() {
     setError('')
     setMsg('')
     try {
+      const selectedDeptObj = departments.find(d => d._id === catForm.department)
+      const deptKey = selectedDeptObj?.key || catForm.department
+
       if (catForm.id) {
         await api.patch(`/api/categories/${catForm.id}`, {
           name: catForm.name,
-          department: catForm.department,
+          departmentKey: deptKey,
           severityWeight: Number(catForm.severityWeight),
           slaHours: Number(catForm.slaHours),
         })
@@ -89,12 +92,13 @@ function AdminDepartments() {
       } else {
         await api.post('/api/categories', {
           name: catForm.name,
-          department: catForm.department,
+          departmentKey: deptKey,
           severityWeight: Number(catForm.severityWeight),
           slaHours: Number(catForm.slaHours),
         })
         setMsg('Category created successfully!')
       }
+
       setShowCatModal(false)
       setCatForm({ id: null, name: '', department: '', severityWeight: 5, slaHours: 48 })
       fetchData()
@@ -178,7 +182,7 @@ function AdminDepartments() {
                       <td className="py-3 px-4 font-bold text-gray-900">{c.name}</td>
                       <td className="py-3 px-4">
                         <span className="bg-blue-50 text-blue-700 border border-blue-200 text-xs px-2 py-0.5 rounded font-semibold">
-                          {c.department?.name || 'Unassigned'}
+                          {c.department?.name || departments.find(d => d.key === c.departmentKey)?.name || c.departmentKey || 'Unassigned'}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center">
@@ -192,10 +196,11 @@ function AdminDepartments() {
                       <td className="py-3 px-4 text-right">
                         <button
                           onClick={() => {
+                            const matchedDept = departments.find(d => d.key === c.departmentKey)
                             setCatForm({
                               id: c._id,
                               name: c.name,
-                              department: c.department?._id || c.department,
+                              department: matchedDept ? matchedDept._id : (c.department?._id || c.department || ''),
                               severityWeight: c.severityWeight || 5,
                               slaHours: c.slaHours || 48,
                             })
@@ -205,6 +210,7 @@ function AdminDepartments() {
                         >
                           Edit
                         </button>
+
                       </td>
                     </tr>
                   ))

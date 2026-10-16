@@ -7,6 +7,7 @@ import icon from 'leaflet/dist/images/marker-icon.png'
 import iconShadow from 'leaflet/dist/images/marker-shadow.png'
 import api from '../../utils/api'
 import CitizenNavbar from '../../components/CitizenNavbar'
+import { useAuth } from '../../context/AuthContext'
 
 // Fix Leaflet default icon issue with Vite
 L.Icon.Default.mergeOptions({ iconUrl: icon, shadowUrl: iconShadow })
@@ -23,6 +24,7 @@ function LocationMarker({ position, setPosition }) {
 }
 
 function ReportIssue() {
+  const { user } = useAuth()
   const [formData, setFormData] = useState({
     category: '', description: '', lat: null, lng: null, isAnonymous: false,
   })
@@ -38,7 +40,20 @@ function ReportIssue() {
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false)
   const navigate = useNavigate()
 
-  useEffect(() => { fetchCategories(); getUserLocation() }, [])
+  // Initial map center resolution:
+  // 1. User's GPS (if allowed)
+  // 2. User's municipality centroid and defaultZoom
+  // 3. India's center [20.5937, 78.9629]
+  const muniCentroid = user?.municipality?.centroid
+  const fallbackCenter = muniCentroid
+    ? [muniCentroid.lat, muniCentroid.lng]
+    : [20.5937, 78.9629]
+  const fallbackZoom = user?.municipality?.defaultZoom || 13
+
+  useEffect(() => {
+    fetchCategories()
+    getUserLocation()
+  }, [])
 
   const fetchCategories = async () => {
     try {
@@ -61,8 +76,17 @@ function ReportIssue() {
           setPosition([latitude, longitude])
           setFormData(prev => ({ ...prev, lat: latitude, lng: longitude }))
         },
-        () => setError('Could not get your location. Please select it on the map.')
+        () => {
+          // If GPS denied/failed, center on user's municipality centroid
+          if (muniCentroid) {
+            setPosition([muniCentroid.lat, muniCentroid.lng])
+            setFormData(prev => ({ ...prev, lat: muniCentroid.lat, lng: muniCentroid.lng }))
+          }
+        }
       )
+    } else if (muniCentroid) {
+      setPosition([muniCentroid.lat, muniCentroid.lng])
+      setFormData(prev => ({ ...prev, lat: muniCentroid.lat, lng: muniCentroid.lng }))
     }
   }
 
@@ -100,12 +124,12 @@ function ReportIssue() {
     } finally { setSubmitting(false) }
   }
 
-  const handleJoinDuplicate = async () => {
+  const handleJoinExisting = async () => {
     if (!possibleDuplicate) return
     try {
       setSubmitting(true)
       await api.post(`/api/reports/${possibleDuplicate.id}/join`)
-      setSuccess('Your report has been added to the existing issue.')
+      setSuccess(`You have joined ticket ${possibleDuplicate.ticketId}. Report count updated.`)
       setShowDuplicateConfirm(false)
       setTimeout(() => navigate('/citizen/reports'), 2000)
     } catch (err) {
@@ -113,40 +137,68 @@ function ReportIssue() {
     } finally { setSubmitting(false) }
   }
 
-  const handleForceNew = () => {
-    setShowDuplicateConfirm(false)
-    setPossibleDuplicate(null)
-    handleSubmit(new Event('submit'), true)
-  }
-
-  if (loading) {
-    return (
-      <div className="page-shell">
-        <CitizenNavbar />
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="w-8 h-8 border-4 border-sovereign-indigo border-t-transparent rounded-full animate-spin" />
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="page-shell">
+    <div className="min-h-screen bg-sandstone">
       <CitizenNavbar />
 
-      <main className="page-content max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Header */}
-        <div className="section-header mb-0">
-          <div>
-            <h1 className="font-display text-2xl font-bold text-sovereign-indigo">Report an Issue</h1>
-            <p className="text-gray-400 text-xs mt-0.5">शिकायत दर्ज करें — File a civic complaint</p>
-          </div>
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <div className="mb-6">
+          <h1 className="font-display text-2xl font-bold text-sovereign-indigo">
+            Report an Issue
+          </h1>
+          <p className="text-gray-500 text-sm mt-1">
+            Pin the location, attach a photo, and our local team will address it.
+          </p>
         </div>
 
-        {error && <div className="alert-error">{error}</div>}
+        {error && (
+          <div className="alert-error mb-5 flex items-start gap-2">
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
+
         {success && (
-          <div className="alert-success flex items-center gap-2">
-            <span>✦</span> {success}
+          <div className="alert-success mb-5 flex items-start gap-2">
+            <span>✓</span>
+            <span>{success}</span>
+          </div>
+        )}
+
+        {showDuplicateConfirm && possibleDuplicate && (
+          <div className="card-nivaran p-5 mb-5 border-2 border-kesariya bg-parchment">
+            <h3 className="font-display font-bold text-sovereign-indigo text-base mb-2">
+              Similar Issue Already Reported Nearby
+            </h3>
+            <p className="text-sm text-gray-600 mb-3">
+              A report matching this category was recently filed nearby ({possibleDuplicate.ticketId}).
+              Joining an existing ticket increases its priority and gets it fixed faster.
+            </p>
+            <div className="bg-white rounded p-3 text-xs space-y-1 mb-4 border border-earthen-slate">
+              <p><span className="font-semibold">Ticket:</span> {possibleDuplicate.ticketId}</p>
+              <p><span className="font-semibold">Category:</span> {possibleDuplicate.category}</p>
+              <p><span className="font-semibold">Description:</span> {possibleDuplicate.description}</p>
+              <p><span className="font-semibold">Status:</span> {possibleDuplicate.status}</p>
+              <p><span className="font-semibold">Citizens who reported:</span> {possibleDuplicate.reportCount}</p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={handleJoinExisting}
+                disabled={submitting}
+                className="btn-primary flex-1 py-2 text-sm"
+              >
+                Join This Ticket (+1 Report)
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { setShowDuplicateConfirm(false); handleSubmit(e, true) }}
+                disabled={submitting}
+                className="btn-secondary flex-1 py-2 text-sm"
+              >
+                File as New Issue Anyway
+              </button>
+            </div>
           </div>
         )}
 
@@ -167,7 +219,7 @@ function ReportIssue() {
                 <option value="">Select a category…</option>
                 {categories.map((cat) => (
                   <option key={cat._id} value={cat._id}>
-                    {cat.name} — {cat.department?.name}
+                    {cat.name} ({cat.slaHours}h SLA)
                   </option>
                 ))}
               </select>
@@ -230,8 +282,8 @@ function ReportIssue() {
             </p>
             <div className="h-72 rounded overflow-hidden border border-earthen-slate">
               <MapContainer
-                center={position || [28.6139, 77.2090]}
-                zoom={13}
+                center={position || fallbackCenter}
+                zoom={fallbackZoom}
                 style={{ height: '100%', width: '100%' }}
               >
                 <TileLayer
@@ -250,94 +302,37 @@ function ReportIssue() {
             )}
           </div>
 
-          {/* Anonymous option */}
-          <div className="card-nivaran px-5 py-4">
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                id="isAnonymous"
-                checked={formData.isAnonymous}
-                onChange={(e) => setFormData({ ...formData, isAnonymous: e.target.checked })}
-                className="mt-0.5 accent-kesariya"
-              />
-              <div>
-                <p className="text-sm font-medium text-gray-700">Report anonymously</p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Your name won't be shown publicly, but your account stays linked for accountability.
-                </p>
-              </div>
-            </label>
+          {/* Anonymous checkbox */}
+          <div className="card-nivaran p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-sovereign-indigo">Report Anonymously</p>
+              <p className="text-xs text-gray-500">
+                Your name will not be shown to other citizens or staff
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              id="isAnonymous"
+              checked={formData.isAnonymous}
+              onChange={(e) => setFormData({ ...formData, isAnonymous: e.target.checked })}
+              className="w-4 h-4 text-kesariya border-gray-300 rounded focus:ring-kesariya"
+            />
           </div>
 
           <button
             type="submit"
-            disabled={submitting}
-            className="btn-kesariya w-full py-3 text-sm"
+            disabled={submitting || loading}
+            className="btn-primary w-full py-3.5 text-base"
           >
             {submitting ? (
               <span className="flex items-center justify-center gap-2">
                 <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Submitting…
+                Submitting Report…
               </span>
             ) : 'Submit Report →'}
           </button>
         </form>
-      </main>
-
-      {/* ── Duplicate confirmation modal ─────────────── */}
-      {showDuplicateConfirm && possibleDuplicate && (
-        <div className="fixed inset-0 bg-sovereign-indigo/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full overflow-hidden">
-            {/* Modal header */}
-            <div className="bg-amber-50 border-b border-amber-200 px-6 py-4 flex items-start gap-3">
-              <span className="text-2xl">⚠️</span>
-              <div>
-                <h2 className="font-display font-bold text-gray-900">Possible Duplicate Found</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  A similar issue was already reported nearby. Is this the same problem?
-                </p>
-              </div>
-            </div>
-
-            {/* Existing report preview */}
-            <div className="p-5">
-              <div className="bg-parchment rounded border border-earthen-slate p-4 mb-4">
-                <p className="font-mono text-xs font-bold text-gray-500 mb-1">{possibleDuplicate.ticketId}</p>
-                <p className="font-semibold text-sovereign-indigo text-sm mb-1">{possibleDuplicate.category}</p>
-                <p className="text-xs text-gray-500 line-clamp-3 mb-3">{possibleDuplicate.description}</p>
-                {possibleDuplicate.photoUrl && (
-                  <img
-                    src={possibleDuplicate.photoUrl}
-                    alt="Existing report"
-                    className="h-28 w-auto rounded border border-earthen-slate object-cover"
-                  />
-                )}
-                <p className="text-[10px] text-gray-400 mt-2">
-                  Filed {new Date(possibleDuplicate.createdAt).toLocaleDateString('en-IN')} ·{' '}
-                  {possibleDuplicate.reportCount} report(s)
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={handleJoinDuplicate}
-                  disabled={submitting}
-                  className="btn-primary py-2.5 text-sm"
-                >
-                  {submitting ? 'Joining…' : '✓ Yes, same issue'}
-                </button>
-                <button
-                  onClick={handleForceNew}
-                  disabled={submitting}
-                  className="btn-ghost py-2.5 text-sm"
-                >
-                  {submitting ? 'Creating…' : 'No, different issue'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   )
 }

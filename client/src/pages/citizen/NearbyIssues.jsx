@@ -8,6 +8,7 @@ import api from '../../utils/api'
 import StatusBadge from '../../components/StatusBadge'
 import CitizenNavbar from '../../components/CitizenNavbar'
 import { getDeptColor } from '../../utils/deptColors'
+import { useAuth } from '../../context/AuthContext'
 
 L.Icon.Default.mergeOptions({ iconUrl: icon, shadowUrl: iconShadow })
 
@@ -39,6 +40,7 @@ function formatDistance(meters) {
 const RADIUS_OPTIONS = [500, 1000, 2000, 5000]
 
 function NearbyIssues() {
+  const { user } = useAuth()
   const [position, setPosition] = useState(null)
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -47,30 +49,61 @@ function NearbyIssues() {
   const [upvotedIds, setUpvotedIds] = useState(new Set())
   const [radius, setRadius] = useState(2000)
 
-  useEffect(() => { getUserLocation() }, [])
+  // Map center hierarchy:
+  // 1. User's GPS position
+  // 2. Municipality centroid and defaultZoom
+  // 3. India's centroid
+  const muniCentroid = user?.municipality?.centroid
+  const fallbackCenter = muniCentroid
+    ? [muniCentroid.lat, muniCentroid.lng]
+    : [20.5937, 78.9629]
+  const fallbackZoom = user?.municipality?.defaultZoom || 13
+
+  useEffect(() => {
+    getUserLocation()
+  }, [])
 
   const getUserLocation = () => {
     if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser.')
-      setLoading(false); return
+      if (muniCentroid) {
+        setPosition([muniCentroid.lat, muniCentroid.lng])
+        fetchNearby(muniCentroid.lat, muniCentroid.lng, radius)
+      } else {
+        setError('Geolocation is not supported by your browser.')
+        setLoading(false)
+      }
+      return
     }
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords
         setPosition([latitude, longitude])
         fetchNearby(latitude, longitude, radius)
       },
-      () => { setError('Could not get your location. Please allow location access and refresh.'); setLoading(false) }
+      () => {
+        if (muniCentroid) {
+          setPosition([muniCentroid.lat, muniCentroid.lng])
+          fetchNearby(muniCentroid.lat, muniCentroid.lng, radius)
+        } else {
+          setError('Could not get your location. Please allow location access.')
+          setLoading(false)
+        }
+      }
     )
   }
 
   const fetchNearby = async (lat, lng, r) => {
     try {
-      setLoading(true); setError('')
+      setLoading(true)
+      setError('')
       const response = await api.get(`/api/reports/nearby?lat=${lat}&lng=${lng}&radius=${r}`)
-      setReports(response.data.reports)
-    } catch { setError('Failed to fetch nearby reports') }
-    finally { setLoading(false) }
+      setReports(response.data.reports || [])
+    } catch {
+      setError('Failed to fetch nearby reports')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleRadiusChange = (r) => {
@@ -107,116 +140,100 @@ function NearbyIssues() {
     <div className="page-shell">
       <CitizenNavbar />
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+      <main className="max-w-4xl mx-auto px-4 py-8">
         {/* Header */}
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="section-header mb-0">
-            <div>
-              <h1 className="font-display text-2xl font-bold text-sovereign-indigo">Nearby Issues</h1>
-              <p className="text-gray-400 text-xs mt-0.5">पास की समस्याएं — Open civic reports in your area</p>
-            </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div>
+            <h1 className="font-display text-2xl font-bold text-sovereign-indigo">
+              Nearby Issues
+            </h1>
+            <p className="text-gray-500 text-sm mt-0.5">
+              Open civic issues in your municipality within {formatDistance(radius)}
+            </p>
           </div>
 
-          {/* View toggle */}
-          <div className="flex border border-earthen-slate rounded overflow-hidden bg-white">
-            {[
-              { key: 'list', label: '☰ List' },
-              { key: 'map', label: '🗺 Map' },
-            ].map(({ key, label }) => (
+          <div className="flex items-center gap-2">
+            {/* Radius select */}
+            <select
+              value={radius}
+              onChange={(e) => handleRadiusChange(Number(e.target.value))}
+              className="text-xs border border-earthen-slate rounded px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-sovereign-indigo"
+            >
+              {RADIUS_OPTIONS.map(r => (
+                <option key={r} value={r}>{formatDistance(r)}</option>
+              ))}
+            </select>
+
+            {/* View toggle */}
+            <div className="flex border border-earthen-slate rounded overflow-hidden">
               <button
-                key={key}
-                onClick={() => setView(key)}
-                className={`px-4 py-1.5 text-sm font-medium transition ${
-                  view === key
+                onClick={() => setView('list')}
+                className={`px-3 py-1.5 text-xs font-semibold transition ${
+                  view === 'list'
                     ? 'bg-sovereign-indigo text-white'
-                    : 'text-gray-600 hover:bg-parchment'
+                    : 'bg-white text-gray-600 hover:bg-gray-50'
                 }`}
               >
-                {label}
+                List ({reports.length})
               </button>
-            ))}
+              <button
+                onClick={() => setView('map')}
+                className={`px-3 py-1.5 text-xs font-semibold transition ${
+                  view === 'map'
+                    ? 'bg-sovereign-indigo text-white'
+                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Map
+              </button>
+            </div>
           </div>
         </div>
 
-        {error && <div className="alert-error">{error}</div>}
-
-        {/* Controls */}
-        <div className="card-nivaran px-4 py-3 flex flex-wrap items-center gap-3">
-          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Radius:</span>
-          {RADIUS_OPTIONS.map(r => (
-            <button
-              key={r}
-              onClick={() => handleRadiusChange(r)}
-              className={`px-3 py-1 rounded text-xs font-semibold transition ${
-                radius === r
-                  ? 'bg-sovereign-indigo text-white'
-                  : 'border border-earthen-slate text-gray-600 hover:border-sovereign-indigo/40 hover:bg-parchment'
-              }`}
-            >
-              {r < 1000 ? `${r}m` : `${r / 1000}km`}
-            </button>
-          ))}
-
-          <div className="ml-auto flex items-center gap-3 text-[10px] text-gray-400">
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-terracotta-alert inline-block" /> High</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> Medium</span>
-            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-jan-kalyan-green inline-block" /> Low</span>
+        {error && (
+          <div className="alert-error mb-5 flex items-start gap-2">
+            <span>⚠️</span>
+            <span>{error}</span>
           </div>
-        </div>
-
-        <p className="text-xs text-gray-400">
-          {reports.length} open {reports.length === 1 ? 'issue' : 'issues'} within{' '}
-          {radius < 1000 ? `${radius}m` : `${radius / 1000}km`}
-        </p>
+        )}
 
         {/* LIST VIEW */}
         {view === 'list' && (
           <div className="space-y-3">
             {reports.length === 0 ? (
-              <div className="card-nivaran p-10 text-center">
-                <p className="text-3xl mb-3">🎉</p>
-                <p className="font-display font-bold text-sovereign-indigo">No open issues nearby!</p>
-                <p className="text-gray-400 text-sm mt-1">Try increasing the radius or check back later.</p>
+              <div className="card-nivaran p-12 text-center">
+                <span className="text-4xl">🎉</span>
+                <h3 className="font-display font-bold text-sovereign-indigo text-lg mt-3">
+                  No open issues nearby
+                </h3>
+                <p className="text-gray-400 text-sm mt-1 max-w-sm mx-auto">
+                  No issues found within {formatDistance(radius)}. Try expanding your radius.
+                </p>
               </div>
             ) : (
-              reports.map(report => {
-                const deptColor = getDeptColor(report.department)
+              reports.map((report) => {
+                const isUpvoted = upvotedIds.has(report.id)
                 return (
-                  <div
-                    key={report.id}
-                    className="card-nivaran p-4 flex gap-4 hover:shadow-md hover:border-earthen-slate-dark transition-all"
-                    style={{ borderLeftColor: deptColor.dot, borderLeftWidth: '3px' }}
-                  >
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="font-mono text-xs font-bold text-gray-500">{report.ticketId}</span>
-                        <span className="text-gray-300 text-xs">·</span>
-                        <span className="text-xs font-medium" style={{ color: deptColor.text }}>
-                          {report.category}
-                        </span>
-                        <StatusBadge status={report.status} size="sm" />
+                  <div key={report.id} className="card-nivaran p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-sovereign-indigo">{report.ticketId}</span>
+                        <StatusBadge status={report.status} />
+                        <span className="text-xs text-gray-400">📍 {formatDistance(report.distanceMeters)} away</span>
                       </div>
-                      <p className="text-sm text-gray-600 line-clamp-2 mb-2">{report.description}</p>
-                      <div className="flex flex-wrap items-center gap-3 text-[10px] text-gray-400">
-                        <span>📍 {formatDistance(report.distanceMeters)}</span>
-                        <span>📋 {report.reportCount} report{report.reportCount !== 1 ? 's' : ''}</span>
-                        <span>{new Date(report.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
-                      </div>
+                      <p className="font-semibold text-gray-900 text-sm">{report.category}</p>
+                      <p className="text-xs text-gray-500 line-clamp-1">{report.description}</p>
                     </div>
 
-                    {/* Upvote */}
-                    <div className="flex-shrink-0">
+                    <div className="flex items-center gap-3">
                       <button
                         onClick={() => handleUpvote(report.id)}
-                        disabled={upvotedIds.has(report.id)}
-                        className={`flex flex-col items-center px-3 py-2 rounded text-xs font-semibold transition ${
-                          upvotedIds.has(report.id)
-                            ? 'bg-sovereign-indigo/10 text-sovereign-indigo cursor-default'
-                            : 'border border-earthen-slate text-gray-500 hover:border-kesariya hover:text-kesariya'
+                        disabled={isUpvoted}
+                        className={`btn-sm flex items-center gap-1.5 text-xs ${
+                          isUpvoted ? 'bg-jan-kalyan-green/10 text-jan-kalyan-green' : 'btn-secondary'
                         }`}
                       >
-                        <span className="text-base">👍</span>
+                        <span>👍</span>
                         <span>{report.upvoteCount}</span>
                       </button>
                     </div>
@@ -232,8 +249,8 @@ function NearbyIssues() {
           <div className="card-nivaran overflow-hidden">
             <div style={{ height: '520px' }}>
               <MapContainer
-                center={position || [28.6139, 77.2090]}
-                zoom={14}
+                center={position || fallbackCenter}
+                zoom={fallbackZoom}
                 style={{ height: '100%', width: '100%' }}
               >
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap" />

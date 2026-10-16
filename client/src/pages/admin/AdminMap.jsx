@@ -9,6 +9,7 @@ import iconShadow from 'leaflet/dist/images/marker-shadow.png'
 import api from '../../utils/api'
 import AdminNavbar from '../../components/AdminNavbar'
 import StatusBadge from '../../components/StatusBadge'
+import { useAuth } from '../../context/AuthContext'
 
 // Fix Leaflet default icon issue with Vite
 L.Icon.Default.mergeOptions({
@@ -42,8 +43,10 @@ function getPriorityMarker(report) {
 }
 
 function AdminMap() {
+  const { user } = useAuth()
   const navigate = useNavigate()
   const [reports, setReports] = useState([])
+
   const [departments, setDepartments] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -110,12 +113,21 @@ function AdminMap() {
     return true
   })
 
-  // Map center calculation
-  const defaultCenter = [31.25, 75.70] // Default Punjab center
+  // Map center hierarchy:
+  // 1. User's municipality centroid and defaultZoom
+  // 2. First report location if available
+  // 3. India's centroid [20.5937, 78.9629]
+  const muniCentroid = user?.municipality?.centroid
+  const defaultCenter = muniCentroid
+    ? [muniCentroid.lat, muniCentroid.lng]
+    : [20.5937, 78.9629]
+  const defaultZoom = user?.municipality?.defaultZoom || 13
+
   const mapCenter =
-    filteredReports.length > 0
+    filteredReports.length > 0 && filteredReports[0].location
       ? [filteredReports[0].location.lat, filteredReports[0].location.lng]
       : defaultCenter
+
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
