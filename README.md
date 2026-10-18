@@ -272,42 +272,6 @@ cd ../client
 npm install
 ```
 
-### Environment Variables
-
-Create a `.env` file in `/server`:
-
-```env
-# Production database
-MONGO_URI=your_mongodb_atlas_uri
-
-# Test database (MUST be a separate Atlas database from MONGO_URI)
-TEST_MONGODB_URI=your_mongodb_test_uri
-
-# Auth
-JWT_SECRET=your_jwt_secret
-
-# Super Admin bootstrap
-SUPERADMIN_EMAIL=superadmin@yourdomain.com
-SUPERADMIN_PASSWORD=your_strong_password
-
-# Media storage (choose one or both)
-IMAGEKIT_PUBLIC_KEY=your_imagekit_public_key
-IMAGEKIT_PRIVATE_KEY=your_imagekit_private_key
-IMAGEKIT_URL_ENDPOINT=your_imagekit_url_endpoint
-CLOUDINARY_CLOUD_NAME=your_cloudinary_name
-CLOUDINARY_API_KEY=your_cloudinary_key
-CLOUDINARY_API_SECRET=your_cloudinary_secret
-
-# Email
-EMAIL_USER=your_smtp_email
-EMAIL_PASS=your_smtp_app_password
-
-# Server
-PORT=5000
-FRONTEND_URL=http://localhost:5173
-```
-
-> ⚠️ `TEST_MONGODB_URI` **must** point to a separate database (e.g., `Nivaran_test`). The test suite clears all collections before each run and should never touch your development or production data.
 
 ### Seed the Database
 
@@ -345,30 +309,6 @@ cd client && npm run dev
 
 Or, with Docker Desktop installed, run the whole stack via `docker compose up` — see `docker-compose.yml`. This is for local development convenience only; production deployment uses Vercel + Render + MongoDB Atlas directly.
 
-### Run Tests
-
-All tests run exclusively against `Nivaran_test` (the `TEST_MONGODB_URI` database). They never touch development or production data.
-
-```bash
-cd server
-
-# Run all suites end-to-end (seeds first, then runs all 8 suites)
-npm run test:all
-
-# Run individual suites
-npm run test:isolation    # Multi-tenant data & WebSocket room isolation (29 tests)
-npm run test:superadmin   # Super Admin portal — cities, admins, audit logs (26 tests)
-npm run test:staff        # Staff approval, revocation, session invalidation (22 tests)
-npm run test:sectors      # Sector taxonomy, routing order, primary index (16 tests)
-npm run test:routing      # Ticket actions, forwarding, citizen masking (23 tests)
-npm run test:deptadmin    # Department admin, checklist, category 403s (12 tests)
-npm run test:cities       # City catalog, live status, waitlist, demo data (10 tests)
-npm run test:crosscity    # Cross-city map pin reporting, boundary & routing rules (18 tests)
-```
-
-**156 automated tests. All 8 suites pass.** Suites are ordered and stop on first failure to prevent cascade noise.
-
----
 
 ## 🌍 Real-World Design References
 
