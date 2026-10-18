@@ -33,7 +33,7 @@ Each Urban Local Body (referred to as a **Municipality** in the platform) operat
 
 A key design decision: the same civic function (e.g., water supply) is handled by a **different real agency in every city** — BWSSB in Bengaluru, Delhi Jal Board in Delhi, BMC's Water Dept in Mumbai. Hardcoding department names nationally would be inaccurate. So the model separates two layers:
 
-- **Sector** — a small, fixed, _national_ taxonomy (~9 sectors: Water Supply, Electricity, Roads & Transport, Solid Waste Management, Sewerage & Drainage, Parks & Environment, Traffic & Enforcement, Public Health & Sanitation, Animal Husbandry) — never changes city to city
+- **Sector** — a fixed, _national_ taxonomy of **11 sectors**: Roads & Bridges, Water Supply, Sewerage & Drainage, Solid Waste, Electricity & Lighting, Traffic & Transport, Health & Sanitation, Parks & Gardens, Building & Town Planning, Municipal Enforcement, Other — never changes city to city
 - **Department** — the real local implementing agency (e.g., "BWSSB", "Delhi Jal Board"), created and managed **by that municipality's own admin**, mapped to one Sector, tagged with an `agencyType` (`municipal_corp` vs. `parastatal_board`, since agencies like BWSSB/BESCOM are separate state boards, not part of the municipal corporation itself)
 - **Category** (Pothole, Streetlight, etc.) stays fixed and national for consistent cross-municipality analytics, mapped to a Sector — individual municipalities can enable/disable categories and override severity weight / SLA hours to fit their local context, but can't fragment the taxonomy itself
 
@@ -44,60 +44,53 @@ This mirrors the "standardize the service, localize the provider" pattern used b
 ## 👥 Roles & Hierarchy
 
 ```
-Platform (Super Admin — bootstraps new municipalities onto the platform; manual/one-time for this project's scale)
- └── Municipality Admin — approves staff, configures departments/categories for their own municipality
-       └── Municipal Staff — self-registers, requires admin approval before portal access
- └── Citizen — self-registers freely, no approval needed
+Super Admin (Platform Level) — provisions & monitors cities, invites city admins, manages national taxonomy & waitlist
+ └── Municipality Admin (City Level) — manages local wings & external agencies, sets primary depts, approves staff
+       └── Municipal Staff (Department Level) — approval-gated, handles assigned tickets, uploads resolution proof
+ └── Citizen (Public) — self-registers, files reports, tracks progress, confirms merges, disputes resolutions
 ```
 
-| Role                   | Responsibilities                                                                                                                                                            |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Citizen**            | Report issues, track status, comment, upvote, rate resolutions, dispute unsatisfactory resolutions                                                                          |
-| **Municipal Staff**    | Self-registers (pending admin approval), handles assigned tickets, updates status, uploads mandatory before/after resolution proof                                          |
-| **Municipality Admin** | Approves/rejects staff applications, configures local departments and category settings, assigns/routes issues, monitors SLA compliance, resolves disputes, views analytics |
-
-Staff self-registration requires admin approval before portal access — this mirrors real organizational onboarding and prevents anyone from falsely claiming to be a municipal employee and gaining access to ticket assignment/resolution tools.
+| Role | Responsibilities | Access Scope |
+| :--- | :--- | :--- |
+| **Super Admin** | Platform-wide oversight, provisions municipalities, invites initial city administrators, monitors computed city live readiness, manages national category taxonomy, views citizen city waitlist demands, audits all sensitive actions across ULBs | Global (Cross-Tenant Platform Administration) |
+| **Municipality Admin** | Manages municipal departments and state external agencies, configures sector primary departments, configures category overrides (severity/SLA/routing), reviews and approves/rejects/revokes staff, assigns/reassigns/forwards tickets, reviews "Set up your city" checklist, resolves disputes | Tenant-Scoped (Restricted to their Municipality) |
+| **Municipal Staff** | Self-registers (pending admin approval), views department ticket queue, updates status with mandatory before/after resolution proof, records field notes | Tenant & Department-Scoped (Municipal Wings only) |
+| **Citizen** | Self-registers in live cities, reports geo-tagged issues, tracks ticket lifecycle, confirms duplicate merges, joins existing issues, rates resolutions, disputes unsatisfactory closures | Tenant-Scoped (Their Registered Municipality) |
 
 ---
 
 ## ✨ Key Features
 
-- 📍 **Geo-tagged issue reporting** with photo upload, GPS-based municipality auto-suggestion at registration
-- 🔁 **Smart duplicate detection** — merges nearby reports of the same issue instead of creating duplicates (Haversine distance-based), scoped within a single municipality
-- ⚖️ **Priority scoring engine** — weighted algorithm ranks issues by urgency (report count, severity, age, upvotes)
-- 🎫 **Ticket ID system** — every report gets a trackable ID, just like real 311 systems
-- 🏙️ **Multi-tenant architecture** — any Urban Local Body can onboard independently, with fully isolated data
-- 👥 **Role-based access control** — Citizen, Municipal Staff (approval-gated), Municipality Admin
-- 🗺️ **Live map dashboard** (Leaflet + OpenStreetMap) — color-coded by priority
-- 🔔 **Real-time status updates** via Socket.io + email fallback
-- 📸 **Before/after resolution photos** — mandatory visual proof of work
-- ⭐ **Citizen satisfaction ratings** feeding into staff/department performance
-- ⏱️ **SLA timers & auto-escalation** — unresolved tickets past deadline get flagged and bumped in priority
-- 🧑‍🤝‍🧑 **Load-balanced staff assignment** within departments (Future Scope)
-- 🌐 **Public transparency dashboard** — anyone can view department-wise resolution stats, no login required
-- 🕵️ **Anonymous reporting option**
-- 💬 **Comment/update threads** on each report
-- ⚖️ **Admin-mediated dispute resolution** — disputed resolutions route to Admin, not back to the original field staff
-- 🤖 **AI-assisted auto-categorization** _(optional enhancement layer/ Future Scope — planned, not yet built)_
+- 📍 **Geo-tagged issue reporting** with photo upload, GPS auto-detect, and map coordinate picking (Leaflet + OpenStreetMap)
+- 🔁 **Smart duplicate detection** — Haversine-based clustering (~50m radius) scoped within municipality; citizens confirm duplicate merges
+- ⚖️ **Explainable priority scoring engine** — weighted ranking by report volume, category severity, days open, and upvotes
+- 🎫 **Public ticket tracking** — human-readable ticket IDs with lifecycle timelines (submitted → assigned → in_progress → resolved / disputed)
+- 🏙️ **Multi-tenant isolation & catalog** — state-level catalogs (e.g. 9 Punjab municipal corporations) with strict tenant data and WebSocket room isolation
+- 🟢 **Computed Live status** — cities are live only when active, assigned an active admin, and initial password setup is completed; public registration and report filing are gated by live status (403 for catalog/non-live cities)
+- 📋 **Privacy-first city waitlist** — citizens in unserved cities request onboarding via SHA-256 hashed emails; Super Admin views demand counts and sets rollout stages (`pending` → `reviewing` → `planned` → `launched`)
+- 🏛️ **11 Standardized sectors & 5-step routing engine** — automated ticket resolution prioritizing local category force overrides, sector primary departments, sector fallbacks, general municipal fallback, or triage queue
+- 🏢 **Municipal wings vs. External state agencies** — support for corporations' internal wings (Roads, Water, Sanitation) and external state agencies (PSPCL, PWD, Traffic Police, PPCB); external agencies receive forwarded tickets but cannot receive staff accounts
+- 🔄 **Ticket operations** — internal department reassignment, external agency forwarding with agency reference IDs, and external status update logging with citizen-friendly timeline masking
+- 🛡️ **Approval-gated staff onboarding** — municipal staff register with employee ID and designation, require admin approval, and support instant session invalidation via `tokenVersion` revocation
+- ✅ **"Set up your city" readiness checklist** — dynamic admin view assessing sector coverage, primary department mapping, agency verification, and triage queues
+- 🔒 **Immutable audit logging** — tamper-evident audit trail for admin actions (invitations, approvals, deactivations, primary swaps, forwardings, settings) with zero secret exposure
+- 🌐 **Public transparency dashboard** — anonymous, live department-level resolution metrics, SLAs, and public issue maps
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer                                         | Technology                                                 |
-| --------------------------------------------- | ---------------------------------------------------------- |
-| Frontend                                      | React (Vite), Tailwind CSS                                 |
-| Backend                                       | Node.js + Express                                          |
-| Database                                      | MongoDB (Atlas)                                            |
-| Auth                                          | JWT + OTP verification                                     |
-| Maps                                          | Leaflet.js + OpenStreetMap, Nominatim (reverse geocoding)  |
-| Image Storage                                 | ImageKit                                                    |
-| Real-time                                     | Socket.io                                                  |
-| Email                                         | Nodemailer                                                 |
-| Scheduled Jobs(Future Scope)                  | node-cron (SLA escalation)                                 |
-| Charts                                        | Recharts                                                   |
-| AI (optional enhancement layer/ Future Scope) | Gemini API — auto-categorization, with rule-based fallback |
-| Deployment                                    | Vercel (frontend) · Render (backend) · MongoDB Atlas (DB)  |
+| Layer | Technology | Description |
+| :--- | :--- | :--- |
+| **Frontend** | React 18, Vite 5, React Router 6 | Modular component architecture |
+| **Styling** | Vanilla CSS Design System | Curated HSL color palette, dark/light theme tokens, glassmorphism, responsive CSS grid/flexbox (no ad-hoc CSS frameworks) |
+| **Backend** | Node.js (ESM), Express 4.19 | RESTful API with tenant scoping & validation middleware |
+| **Database** | MongoDB (Atlas) + Mongoose 8.5 | Compound partial unique indexes for multi-tenant constraints |
+| **Real-time** | Socket.io 4.8 | Tenant-scoped rooms (`muni:<id>:admins`, `muni:<id>:staff`, `user:<id>`) |
+| **Authentication** | JWT + Bcryptjs + OTP | Role-based authorization, one-time invite tokens, token versioning |
+| **Maps & GIS** | Leaflet.js, OpenStreetMap, Nominatim | GeoJSON coordinates, interactive pin placement, reverse geocoding |
+| **Media Storage** | ImageKit / Cloudinary / Local Multer | Before & after visual evidence storage |
+| **Testing** | Node Test Runner / Custom Suites | 8 dedicated suites with 138+ automated tests against isolated test database |
 
 ---
 
@@ -121,57 +114,69 @@ A fully explainable, self-designed weighted formula — no black-box AI involved
 
 ```mermaid
 flowchart TB
-    subgraph Client["Client Layer"]
+    subgraph PublicCitizen["Public & Citizen Layer"]
         A1[Citizen Web App]
-        A2[Staff Dashboard]
-        A3[Admin Dashboard]
         A4[Public Transparency Page]
     end
 
-    subgraph Server["Application Server - Node.js/Express"]
-        B0[Multi-Tenancy Scoping Layer]
-        B1[Auth Service - JWT + OTP + Staff Approval]
-        B2[Report Service]
-        B3[Duplicate Detection Engine]
-        B4[Priority Scoring Engine]
-        B5[Assignment / SLA Engine]
-        B6[Notification Service]
-        B7[Analytics Service]
-        B8[AI Categorization - optional, not yet built]
+    subgraph StaffAdmin["Staff & Admin Layer"]
+        A2[Staff Dashboard]
+        A3[City Admin Dashboard]
+        A5[Super Admin Portal]
     end
 
-    subgraph External["External Free Services"]
-        C1[(MongoDB Atlas)]
-        C2[ImageKit - Image Storage]
-        C3[Nodemailer - Email]
+    subgraph Server["Application Server — Node.js/Express"]
+        B0[Multi-Tenancy Scoping Layer]
+        B1["Auth Service — JWT + OTP + Invite Tokens"]
+        B1b["Live Status Engine — cityStatus.js"]
+        B2[Report Service]
+        B3[Duplicate Detection — Haversine]
+        B4[Priority Scoring Engine]
+        B5[SLA & Assignment Engine]
+        B6["Notification Service — Socket.io + Email"]
+        B7[Analytics Service]
+        B8["Routing Engine — 5-step sector resolution"]
+        B9["City Waitlist — SHA-256 hashed emails"]
+        B10[Audit Logger]
+    end
+
+    subgraph External["External Services"]
+        C1[("MongoDB Atlas — Production")]
+        C2[ImageKit / Cloudinary]
+        C3[Nodemailer — Email]
         C4[Leaflet + OpenStreetMap]
-        C5[Gemini API - optional]
     end
 
     A1 --> B1
     A2 --> B1
     A3 --> B1
+    A5 --> B1
     A4 --> B7
 
-    B1 --> B0
+    B1 --> B1b
+    B1b --> B0
     B2 --> B0
     B5 --> B0
     B7 --> B0
+    B9 --> B0
+    B10 --> B0
     B0 --> C1
 
     B2 --> B3
     B3 --> B4
+    B2 --> B8
+    B8 --> B5
     B2 --> C2
     B6 --> C3
     B6 -.->|realtime| A1
     B6 -.->|realtime| A2
     B6 -.->|realtime| A3
-    B8 -.->|optional call| C5
     A1 --> C4
     A3 --> C4
 ```
 
-Every request that touches Reports, Staff, or Departments passes through the **Multi-Tenancy Scoping Layer**, which filters by the requesting user's `municipality` — enforced server-side, not just hidden in the UI, so one municipality can never see or act on another's data even via direct API calls.
+Every request that touches Reports, Staff, or Departments passes through the **Multi-Tenancy Scoping Layer**, which filters by the requesting user's `municipality` — enforced server-side, not just hidden in the UI. Registration and report submission are additionally gated by the **Live Status Engine** — a city must be active, have an active admin, and have completed password setup before citizens can interact with it.
+
 
 ---
 
@@ -271,30 +276,97 @@ npm install
 
 Create a `.env` file in `/server`:
 
-```
+```env
+# Production database
 MONGO_URI=your_mongodb_atlas_uri
+
+# Test database (MUST be a separate Atlas database from MONGO_URI)
+TEST_MONGODB_URI=your_mongodb_test_uri
+
+# Auth
 JWT_SECRET=your_jwt_secret
+
+# Super Admin bootstrap
+SUPERADMIN_EMAIL=superadmin@yourdomain.com
+SUPERADMIN_PASSWORD=your_strong_password
+
+# Media storage (choose one or both)
 IMAGEKIT_PUBLIC_KEY=your_imagekit_public_key
 IMAGEKIT_PRIVATE_KEY=your_imagekit_private_key
 IMAGEKIT_URL_ENDPOINT=your_imagekit_url_endpoint
-EMAIL_USER=your_email
-EMAIL_PASS=your_app_password
-GEMINI_API_KEY=your_gemini_key   # only needed if the optional AI phase is built
+CLOUDINARY_CLOUD_NAME=your_cloudinary_name
+CLOUDINARY_API_KEY=your_cloudinary_key
+CLOUDINARY_API_SECRET=your_cloudinary_secret
+
+# Email
+EMAIL_USER=your_smtp_email
+EMAIL_PASS=your_smtp_app_password
+
+# Server
+PORT=5000
+FRONTEND_URL=http://localhost:5173
 ```
 
-### Run locally
+> ⚠️ `TEST_MONGODB_URI` **must** point to a separate database (e.g., `Nivaran_test`). The test suite clears all collections before each run and should never touch your development or production data.
+
+### Seed the Database
+
+The platform ships with a seeder that provisions the full Punjab city catalog, national categories, per-city departments and state agencies, and realistic demo data.
 
 ```bash
-# Terminal 1 - backend
 cd server
-npm run dev
 
-# Terminal 2 - frontend
-cd client
-npm run dev
+# Seed production / development database
+npm run db:fresh          # resets and re-seeds MONGO_URI
+
+# Seed the isolated test database (used by all test suites)
+npm run db:fresh:test     # resets and re-seeds TEST_MONGODB_URI (Nivaran_test)
 ```
 
-Or, with Docker Desktop installed, run the whole stack (backend, frontend, local Mongo) with a single command via `docker compose up` — see `docker-compose.yml`. This is for local development convenience only; production deployment still uses Vercel + Render + MongoDB Atlas directly.
+**Demo accounts seeded** (password: `Demo@123`):
+
+| City | Admin | Citizens |
+| :--- | :--- | :--- |
+| Jalandhar | `admin.jalandhar@nivaran.gov` | `citizen1.jalandhar@example.com` |
+| Phagwara | `admin.phagwara@nivaran.gov` | `citizen1.phagwara@example.com` |
+| Ludhiana | `admin.ludhiana@nivaran.gov` | `citizen1.ludhiana@example.com` |
+
+Each city also has 3 staff accounts (`staff.roads.*`, `staff.water.*`, `staff.sanitation.*`) and 20+ realistic reports spread across all 19 national categories.
+
+### Run Locally
+
+```bash
+# Terminal 1 — backend (runs on http://localhost:5000)
+cd server && npm run dev
+
+# Terminal 2 — frontend (runs on http://localhost:5173)
+cd client && npm run dev
+```
+
+Or, with Docker Desktop installed, run the whole stack via `docker compose up` — see `docker-compose.yml`. This is for local development convenience only; production deployment uses Vercel + Render + MongoDB Atlas directly.
+
+### Run Tests
+
+All tests run exclusively against `Nivaran_test` (the `TEST_MONGODB_URI` database). They never touch development or production data.
+
+```bash
+cd server
+
+# Run all suites end-to-end (seeds first, then runs all 8 suites)
+npm run test:all
+
+# Run individual suites
+npm run test:isolation    # Multi-tenant data & WebSocket room isolation (29 tests)
+npm run test:superadmin   # Super Admin portal — cities, admins, audit logs (26 tests)
+npm run test:staff        # Staff approval, revocation, session invalidation (22 tests)
+npm run test:sectors      # Sector taxonomy, routing order, primary index (16 tests)
+npm run test:routing      # Ticket actions, forwarding, citizen masking (23 tests)
+npm run test:deptadmin    # Department admin, checklist, category 403s (12 tests)
+npm run test:cities       # City catalog, live status, waitlist, demo data (10 tests)
+npm run test:crosscity    # Cross-city map pin reporting, boundary & routing rules (18 tests)
+```
+
+**156 automated tests. All 8 suites pass.** Suites are ordered and stop on first failure to prevent cascade noise.
 
 ---
 
