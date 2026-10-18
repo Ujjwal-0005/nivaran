@@ -71,8 +71,24 @@ const userSchema = new mongoose.Schema({
   lastOtpSentAt: {
     type: Date,
   },
+  // Used by the Super Admin invite flow to let a new city admin set their password
+  passwordSetToken: {
+    type: String,
+    default: null,
+  },
+  passwordSetTokenExpiry: {
+    type: Date,
+    default: null,
+  },
+  // Allows super admin to soft-disable a city admin without deleting the user
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
 }, {
   timestamps: true,
 })
+
+userSchema.index({ passwordSetToken: 1 }, { sparse: true })
 
 export default mongoose.model('User', userSchema)
