@@ -26,6 +26,11 @@ export const auth = async (req, res, next) => {
       return res.status(401).json({ message: 'Session expired, please login again' })
     }
 
+    // Reject deactivated accounts (belt-and-suspenders; revoke also bumps tokenVersion)
+    if (user.isActive === false) {
+      return res.status(403).json({ message: 'Account deactivated. Contact the Super Admin.' })
+    }
+
     req.user = {
       _id: user._id,
       userId: user._id,

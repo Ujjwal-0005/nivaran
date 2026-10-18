@@ -212,6 +212,11 @@ export const login = async (req, res) => {
       })
     }
 
+    // Reject inactive accounts
+    if (user.isActive === false) {
+      return res.status(403).json({ message: 'Your account has been deactivated. Contact the Super Admin.' })
+    }
+
     // Check password
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash)
     if (!isPasswordValid) {
@@ -239,3 +244,50 @@ export const login = async (req, res) => {
     res.status(500).json({ message: 'Server error during login' })
   }
 }
+
+// Set Password (city admin invite flow – token-based, no old password needed)
+export const setPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body
+
+    if (!token) return res.status(400).json({ message: 'token is required' })
+    if (!password || password.length < 8) {
+      return res.status(400).json({ message: 'password must be at least 8 characters' })
+    }
+
+    const user = await User.findOne({
+      passwordSetToken: token,
+      passwordSetTokenExpiry: { $gt: new Date() },
+    }).populate('municipality')
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired set-password link' })
+    }
+
+    // Set new password
+    user.passwordHash = await bcrypt.hash(password, 12)
+    user.passwordSetToken = null
+    user.passwordSetTokenExpiry = null
+    user.isVerified = true
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1
+    await user.save()
+
+    const jwtToken = generateToken(user)
+
+    res.status(200).json({
+      message: 'Password set successfully. You are now logged in.',
+      token: jwtToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        municipality: user.municipality,
+      },
+    })
+  } catch (error) {
+    console.error('setPassword error:', error)
+    res.status(500).json({ message: 'Server error during password setup' })
+  }
+}
+
