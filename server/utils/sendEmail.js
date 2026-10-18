@@ -157,6 +157,83 @@ export const sendResolvedEmail = async (to, { ticketId, category, resolutionNote
   }
 }
 
+// Step 2: City Admin invite email (Super Admin portal)
+export const sendCityAdminInviteEmail = async (to, { name, municipalityName, setPasswordUrl }) => {
+  const subject = `You have been appointed as City Admin for ${municipalityName} on Nivaran`
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+      <div style="background-color: #0B2545; color: #ffffff; padding: 20px; text-align: center;">
+        <h1 style="margin: 0; font-size: 20px;">Nivaran — City Admin Invitation</h1>
+        <p style="margin: 5px 0 0 0; font-size: 13px; color: #cbd5e1;">${municipalityName}</p>
+      </div>
+      <div style="padding: 24px; color: #1f2937;">
+        <p style="font-size: 15px;">Dear ${name},</p>
+        <p style="font-size: 14px; line-height: 1.5;">
+          You have been appointed as the <strong>City Administrator</strong> for
+          <strong>${municipalityName}</strong> on the Nivaran Civic Operations Platform.
+        </p>
+        <p style="font-size: 14px;">
+          Please click the button below to set your password and activate your account.
+          This link is valid for <strong>48 hours</strong>.
+        </p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="${setPasswordUrl}"
+             style="background-color: #0B2545; color: #ffffff; padding: 12px 28px; border-radius: 8px;
+                    text-decoration: none; font-size: 14px; font-weight: bold; display: inline-block;">
+            Set Password &amp; Activate Account →
+          </a>
+        </div>
+        <p style="font-size: 12px; color: #6b7280;">
+          If you were not expecting this invitation, please ignore this email or contact
+          the Nivaran platform team immediately.
+        </p>
+      </div>
+      <div style="background-color: #f1f5f9; padding: 12px 24px; text-align: center; color: #64748b; font-size: 11px;">
+        Report it. Track it. Nivaran — Resolved.
+      </div>
+    </div>
+  `
+  try {
+    await sendEmail(to, subject, html)
+  } catch (err) {
+    console.error(`Failed to send city admin invite to ${to}:`, err.message)
+    throw err
+  }
+}
+
+// Step 2: Notify city admin that their password was reset by super admin
+export const sendPasswordChangedEmail = async (to, { name, municipalityName }) => {
+  const subject = 'Nivaran: Your admin account password has been reset'
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #fca5a5; border-radius: 12px; overflow: hidden;">
+      <div style="background-color: #b91c1c; color: #ffffff; padding: 20px; text-align: center;">
+        <h1 style="margin: 0; font-size: 20px;">Security Notice</h1>
+        <p style="margin: 5px 0 0 0; font-size: 13px; color: #fee2e2;">Nivaran Admin Account</p>
+      </div>
+      <div style="padding: 24px; color: #1f2937;">
+        <p style="font-size: 15px;">Dear ${name},</p>
+        <p style="font-size: 14px; line-height: 1.5;">
+          Your administrator account for <strong>${municipalityName}</strong> on Nivaran has had its
+          password reset by the platform Super Admin. A new set-password link has been sent in a
+          separate email.
+        </p>
+        <p style="font-size: 13px; color: #6b7280;">
+          If this was unexpected, contact the Nivaran platform team immediately.
+        </p>
+      </div>
+      <div style="background-color: #f1f5f9; padding: 12px 24px; text-align: center; color: #64748b; font-size: 11px;">
+        Report it. Track it. Nivaran — Resolved.
+      </div>
+    </div>
+  `
+  try {
+    await sendEmail(to, subject, html)
+  } catch (err) {
+    console.error(`Failed to send password-changed notice to ${to}:`, err.message)
+    // Non-blocking – the reset already succeeded
+  }
+}
+
 // Phase 8: Admin escalation alert email
 export const sendEscalationEmail = async (to, { ticketId, category, priorityScore, hoursOverdue }) => {
   const subject = `🚨 ALERT: Ticket ${ticketId} has breached SLA and been escalated`
