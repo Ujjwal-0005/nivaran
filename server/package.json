@@ -10,7 +10,9 @@
     "seed": "node seed.js",
     "db:reset": "node resetDb.js --confirm",
     "db:fresh": "node resetDb.js --confirm && node seed.js",
-    "test:isolation": "node tests/tenantIsolation.test.js"
+    "test:isolation": "node tests/tenantIsolation.test.js",
+    "test:superadmin": "node tests/superadmin.test.js",
+    "superadmin:create": "node scripts/createSuperAdmin.js"
   },
   "keywords": [],
   "author": "",
