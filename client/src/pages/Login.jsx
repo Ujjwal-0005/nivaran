@@ -22,7 +22,7 @@ function Login() {
     try {
       const response = await api.post('/api/auth/login', formData)
       login(response.data.token, response.data.user)
-      const redirects = { citizen: '/citizen', staff: '/staff', admin: '/admin' }
+      const redirects = { citizen: '/citizen', staff: '/staff', admin: '/admin', superadmin: '/superadmin' }
       navigate(redirects[response.data.user.role] || '/')
     } catch (err) {
       if (err.response?.data?.requiresVerification) {
