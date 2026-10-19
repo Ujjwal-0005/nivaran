@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
@@ -255,12 +256,19 @@ export const setPassword = async (req, res) => {
       return res.status(400).json({ message: 'password must be at least 8 characters' })
     }
 
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
     const user = await User.findOne({
-      passwordSetToken: token,
+      passwordSetToken: hashedToken,
       passwordSetTokenExpiry: { $gt: new Date() },
     }).populate('municipality')
 
-    if (!user) {
+    if (!user || !user.passwordSetToken) {
+      return res.status(400).json({ message: 'Invalid or expired set-password link' })
+    }
+
+    const storedBuf = Buffer.from(user.passwordSetToken, 'hex')
+    const providedBuf = Buffer.from(hashedToken, 'hex')
+    if (storedBuf.length !== providedBuf.length || !crypto.timingSafeEqual(storedBuf, providedBuf)) {
       return res.status(400).json({ message: 'Invalid or expired set-password link' })
     }
 

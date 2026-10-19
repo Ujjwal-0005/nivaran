@@ -23,7 +23,16 @@ dotenv.config()
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
+import helmet from 'helmet'
+import { authLimiter, generalLimiter } from './middleware/rateLimiters.js'
+
 const app = express()
+
+// Trust first proxy (Render / Cloudflare / reverse proxy)
+app.set('trust proxy', 1)
+
+// Helmet security headers
+app.use(helmet())
 
 // Connect to MongoDB
 connectDB()
@@ -50,6 +59,9 @@ app.use(
   })
 )
 app.use(express.json())
+
+// General rate limiter across all /api endpoints
+app.use('/api', generalLimiter)
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
