@@ -23,6 +23,10 @@ import AdminDepartments from './pages/admin/AdminDepartments'
 import AdminDisputes from './pages/admin/AdminDisputes'
 import AdminAnalytics from './pages/admin/AdminAnalytics'
 import PublicTransparency from './pages/PublicTransparency'
+import SetPassword from './pages/SetPassword'
+import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard'
+import SuperAdminMunicipalities from './pages/superadmin/SuperAdminMunicipalities'
+import SuperAdminAuditLog from './pages/superadmin/SuperAdminAuditLog'
 
 function App() {
   return (
@@ -36,6 +40,7 @@ function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/login" element={<Login />} />
             <Route path="/verify-otp" element={<VerifyOTP />} />
+            <Route path="/set-password" element={<SetPassword />} />
             
             {/* Protected Routes */}
             <Route 
@@ -155,6 +160,32 @@ function App() {
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminDisputes />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* ── Super Admin Routes ── */}
+            <Route 
+              path="/superadmin" 
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperAdminDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/superadmin/municipalities" 
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperAdminMunicipalities />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/superadmin/audit-log" 
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperAdminAuditLog />
                 </ProtectedRoute>
               } 
             />
