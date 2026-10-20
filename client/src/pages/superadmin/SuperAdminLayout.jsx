@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext'
 const NAV_ITEMS = [
   { to: '/superadmin', icon: '🏠', label: 'Dashboard' },
   { to: '/superadmin/municipalities', icon: '🏙️', label: 'Cities' },
+  { to: '/superadmin/admins', icon: '👥', label: 'Admins' },
+  { to: '/superadmin/city-requests', icon: '📬', label: 'City Requests' },
   { to: '/superadmin/audit-log', icon: '📋', label: 'Audit Log' },
 ]
 

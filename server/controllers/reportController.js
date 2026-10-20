@@ -8,6 +8,12 @@ import imagekit from '../config/imagekit.js'
 import { toFile } from '@imagekit/nodejs'
 import { scopeFilter, findInScope } from '../utils/scope.js'
 
+import Municipality from '../models/Municipality.js'
+import CategoryConfig from '../models/CategoryConfig.js'
+import { resolveDepartment } from '../services/resolveDepartment.js'
+import { getCityStatus } from '../utils/cityStatus.js'
+import { resolveCityFromPoint } from '../utils/resolveCityFromPoint.js'
+
 // Generate unique ticket ID
 const generateTicketId = () => {
   const year = new Date().getFullYear()
@@ -18,7 +24,8 @@ const generateTicketId = () => {
 // Submit a new report (citizen only)
 export const submitReport = async (req, res) => {
   try {
-    const { category, description, lat, lng, isAnonymous, forceNew } = req.body
+    const { category, categoryId, description, lat, lng, isAnonymous, forceNew } = req.body
+    const targetCategoryInput = category || categoryId
     const userId = req.user.userId
     const userMunicipality = req.user.municipality
 
@@ -26,40 +33,102 @@ export const submitReport = async (req, res) => {
       return res.status(403).json({ message: 'User does not belong to any municipality' })
     }
 
-    const isAnonymousBool = isAnonymous === 'true' || isAnonymous === true
-    const forceNewBool = forceNew === 'true' || forceNew === true
-
-    if (!category || !description || !lat || !lng) {
+    if (!targetCategoryInput || !description || lat === undefined || lng === undefined) {
       return res.status(400).json({ message: 'Category, description, and location are required' })
     }
 
+    const latNum = parseFloat(lat)
+    const lngNum = parseFloat(lng)
+    if (isNaN(latNum) || isNaN(lngNum) || latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+      return res.status(400).json({ message: 'Valid geographic latitude and longitude coordinates are required' })
+    }
+
+    // Derive target municipality from the pin coordinates (server authoritative)
+    const resolvedCity = await resolveCityFromPoint({
+      lat: latNum,
+      lng: lngNum,
+      homeMunicipalityId: userMunicipality,
+    })
+
+    if (!resolvedCity || (!resolvedCity.municipality && !resolvedCity.nearestNotLive)) {
+      return res.status(400).json({
+        message: 'The selected pin location does not fall within any supported municipality boundary.',
+      })
+    }
+
+    if (!resolvedCity.isLive || !resolvedCity.municipality) {
+      const cityName = resolvedCity.nearestNotLive?.name || 'This city'
+      return res.status(403).json({
+        message: `${cityName} is not live on Nivaran yet`,
+      })
+    }
+
+    const targetMunicipalityDoc = resolvedCity.municipality
+    const targetMunicipalityId = targetMunicipalityDoc._id
+
+    // Check cross-city daily submission limit (anti-abuse)
+    const isCrossCity = targetMunicipalityId.toString() !== userMunicipality.toString()
+    if (isCrossCity) {
+      const { getCrossCityDailyLimit } = await import('../utils/resolveCityFromPoint.js')
+      const dailyLimit = getCrossCityDailyLimit()
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+
+      const crossCityCountLast24h = await Report.countDocuments({
+        citizen: userId,
+        municipality: { $ne: userMunicipality },
+        createdAt: { $gte: oneDayAgo },
+      })
+
+      if (crossCityCountLast24h >= dailyLimit) {
+        return res.status(429).json({
+          message: `Daily cross-city report limit reached (${dailyLimit} reports per 24 hours). You can still report in your home municipality.`,
+        })
+      }
+    }
+
+    const isAnonymousBool = isAnonymous === 'true' || isAnonymous === true
+    const forceNewBool = forceNew === 'true' || forceNew === true
+
     // Look up category
-    const categoryDoc = await Category.findById(category)
+    const categoryDoc = await Category.findById(targetCategoryInput)
     if (!categoryDoc) {
       return res.status(404).json({ message: 'Category not found' })
     }
 
-    // Route to department in user's municipality by category.departmentKey
-    let targetDept = null
-    let departmentUnresolved = false
+    // Resolve department and check city-level category configuration in target municipality
+    const resolution = await resolveDepartment({
+      municipalityId: targetMunicipalityId,
+      categoryId: categoryDoc._id,
+    })
 
-    if (categoryDoc.departmentKey) {
-      targetDept = await Department.findOne({
-        municipality: userMunicipality,
-        key: categoryDoc.departmentKey,
+    if (resolution.disabled) {
+      return res.status(400).json({
+        message: 'This category is currently not accepted in this municipality.',
       })
     }
 
-    if (!targetDept) {
-      departmentUnresolved = true
+    let targetDept = resolution.department || null
+    let routedBy = resolution.routedBy || 'none'
+    let departmentUnresolved = Boolean(resolution.unresolved)
+    const routingHistory = []
+
+    if (targetDept) {
+      routingHistory.push({
+        at: new Date(),
+        action: 'auto',
+        fromDepartment: null,
+        toDepartment: targetDept._id,
+        byUser: null,
+        reason: `Auto-routed via ${routedBy}`,
+      })
     }
 
-    // Check for duplicate in user's municipality
+    // Check for duplicate in target municipality
     if (!forceNewBool) {
       const duplicateReport = await checkForDuplicate({
         category,
-        location: { lat: parseFloat(lat), lng: parseFloat(lng) },
-        municipality: userMunicipality,
+        location: { lat: latNum, lng: lngNum },
+        municipality: targetMunicipalityId,
       })
 
       if (duplicateReport) {
@@ -98,21 +167,22 @@ export const submitReport = async (req, res) => {
       return res.status(500).json({ message: 'Failed to generate unique ticket ID' })
     }
 
-    // Auto-assign to staff member in target department within same municipality
+    // Auto-assign to staff member: ONLY if resolved department is municipal (isExternal: false) in target municipality
     let assignedStaffId = null
-    if (targetDept) {
+    if (targetDept && !targetDept.isExternal) {
       const departmentStaff = await User.find({
         role: 'staff',
         department: targetDept._id,
-        municipality: userMunicipality,
+        municipality: targetMunicipalityId,
         isVerified: true,
+        applicationStatus: 'approved', // Only approved staff
       })
 
       if (departmentStaff.length > 0) {
         const staffWithCounts = await Promise.all(
           departmentStaff.map(async (staff) => {
             const count = await Report.countDocuments({
-              municipality: userMunicipality,
+              municipality: targetMunicipalityId,
               assignedTo: staff._id,
               status: { $ne: 'resolved' },
             })
@@ -124,18 +194,35 @@ export const submitReport = async (req, res) => {
       }
     }
 
-    const slaHours = categoryDoc.slaHours || 48
-    const slaDeadline = new Date(Date.now() + slaHours * 60 * 60 * 1000)
+    // Check CategoryConfig for severity and SLA overrides in target municipality
+    const catConfig = await CategoryConfig.findOne({
+      municipality: targetMunicipalityId,
+      category: categoryDoc._id,
+    })
+
+    const effectiveSeverity = (catConfig && typeof catConfig.severityOverride === 'number')
+      ? catConfig.severityOverride
+      : (categoryDoc.severityWeight || 1)
+
+    const effectiveSlaHours = (catConfig && typeof catConfig.slaHoursOverride === 'number')
+      ? catConfig.slaHoursOverride
+      : (categoryDoc.slaHours || 48)
+
+    const slaDeadline = new Date(Date.now() + effectiveSlaHours * 60 * 60 * 1000)
 
     const reportData = {
       ticketId,
-      municipality: userMunicipality,
+      municipality: targetMunicipalityId,
       citizen: userId,
       category: categoryDoc._id,
       department: targetDept ? targetDept._id : null,
       departmentUnresolved,
+      routedBy,
+      routingHistory,
       description,
-      location: { lat: parseFloat(lat), lng: parseFloat(lng) },
+      location: { lat: latNum, lng: lngNum },
+      // GeoJSON Point for 2dsphere duplicate prefilter (GeoJSON order: [lng, lat])
+      geoPoint: { type: 'Point', coordinates: [lngNum, latNum] },
       isAnonymous: isAnonymousBool,
       reportedBy: [userId],
       assignedTo: assignedStaffId,
@@ -167,14 +254,27 @@ export const submitReport = async (req, res) => {
     const report = await Report.create(reportData)
 
     const daysOpen = calculateDaysOpen(report.createdAt)
-    const severityWeight = categoryDoc.severityWeight || 1
     report.priorityScore = calculatePriorityScore({
       reportCount: report.reportCount,
-      severityWeight,
+      severityWeight: effectiveSeverity,
       daysOpen,
       upvotes: report.upvotes.length,
     })
     await report.save()
+
+    // Notify admins of target municipality in real-time
+    try {
+      const { notifyAdmins } = await import('../utils/notify.js')
+      notifyAdmins(targetMunicipalityId, 'new_report', {
+        ticketId: report.ticketId,
+        category: categoryDoc.name,
+        department: targetDept ? targetDept.name : 'Unresolved Department',
+        location: report.location,
+        createdAt: report.createdAt,
+      })
+    } catch (notifErr) {
+      // Non-blocking notification
+    }
 
     res.status(201).json({
       message: 'Report submitted successfully',
@@ -182,6 +282,8 @@ export const submitReport = async (req, res) => {
       report: {
         id: report._id,
         ticketId: report.ticketId,
+        municipality: targetMunicipalityId,
+        city: targetMunicipalityDoc.name,
         category: categoryDoc.name,
         department: targetDept ? targetDept.name : 'Unresolved Department',
         departmentUnresolved: report.departmentUnresolved,
@@ -243,9 +345,52 @@ export const upvoteReport = async (req, res) => {
 export const joinReport = async (req, res) => {
   try {
     const { id } = req.params
+    const { lat, lng } = req.body
     const userId = req.user.userId
 
-    const report = await findInScope(Report, req, id, 'category')
+    // When joining from duplicate confirmation or map, require pin
+    let report = await Report.findById(id).populate('category')
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
+
+    if (lat !== undefined && lng !== undefined) {
+      const latNum = parseFloat(lat)
+      const lngNum = parseFloat(lng)
+      if (isNaN(latNum) || isNaN(lngNum)) {
+        return res.status(400).json({ message: 'Valid lat and lng required' })
+      }
+
+      // 1. Resolve city of the joiner's pin
+      const { resolveCityFromPoint } = await import('../utils/resolveCityFromPoint.js')
+      const pinCity = await resolveCityFromPoint({
+        lat: latNum,
+        lng: lngNum,
+        homeMunicipalityId: req.user.municipality,
+      })
+
+      if (!pinCity || !pinCity.municipality || pinCity.municipality._id.toString() !== report.municipality.toString()) {
+        return res.status(400).json({ message: 'Join location must be in the same city as the report' })
+      }
+
+      // 2. Proximity check (within 50 meters)
+      const { haversineDistance } = await import('../algorithms/duplicateDetection.js')
+      const distMeters = haversineDistance(latNum, lngNum, report.location.lat, report.location.lng)
+      if (distMeters > 50) {
+        return res.status(400).json({
+          message: `Join location is too far (${Math.round(distMeters)}m). Must be within 50 meters of the reported issue.`,
+        })
+      }
+    } else {
+      // If no coordinates provided in body, fallback to scoped check
+      if (report.municipality.toString() !== req.user.municipality.toString()) {
+        const isOwnerOrReporter = (report.citizen && report.citizen.toString() === userId.toString()) ||
+          (report.reportedBy && report.reportedBy.some((r) => r.toString() === userId.toString()))
+        if (!isOwnerOrReporter) {
+          return res.status(404).json({ message: 'Report not found' })
+        }
+      }
+    }
 
     if (report.reportedBy.map(String).includes(userId.toString())) {
       return res.status(400).json({ message: 'You have already reported this issue' })
@@ -284,35 +429,57 @@ export const joinReport = async (req, res) => {
 export const getMyReports = async (req, res) => {
   try {
     const userId = req.user.userId
-    const filter = scopeFilter(req)
+    let queryFilter
+    if (req.user.role === 'citizen') {
+      queryFilter = {
+        $or: [
+          { citizen: userId },
+          { reportedBy: userId },
+        ],
+      }
+    } else {
+      const filter = scopeFilter(req)
+      queryFilter = {
+        ...filter,
+        $or: [
+          { citizen: userId },
+          { reportedBy: userId },
+        ],
+      }
+    }
 
-    const reports = await Report.find({
-      ...filter,
-      $or: [
-        { citizen: userId },
-        { reportedBy: userId },
-      ],
-    })
-      .populate('category')
-      .populate('department')
-      .populate('citizen', 'name email')
-      .sort({ createdAt: -1 })
+    const { parsePagination, buildPagination } = await import('../utils/pagination.js')
+    const { page, limit, skip } = parsePagination(req, { defaultLimit: 20, maxLimit: 100 })
 
-    const reportsWithPriority = reports.map((report) => {
-      const daysOpen = calculateDaysOpen(report.createdAt)
-      const severityWeight = report.category?.severityWeight || 1
-      const priorityScore = calculatePriorityScore({
-        reportCount: report.reportCount,
+    const [rawReports, total] = await Promise.all([
+      Report.find(queryFilter)
+        .populate('category', 'name severityWeight slaHours')
+        .populate('department', 'name key')
+        .populate('municipality', 'name state')
+        .populate('citizen', 'name email')
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Report.countDocuments(queryFilter),
+    ])
+
+    const reportsWithPriority = rawReports.map((r) => {
+      const daysOpen = calculateDaysOpen(r.createdAt)
+      const severityWeight = r.category?.severityWeight || 1
+      r.priorityScore = calculatePriorityScore({
+        reportCount: r.reportCount,
         severityWeight,
         daysOpen,
-        upvotes: report.upvotes.length,
+        upvotes: r.upvotes?.length || 0,
       })
-      const reportObj = report.toObject()
-      reportObj.priorityScore = priorityScore
-      return reportObj
+      return r
     })
 
-    res.status(200).json({ reports: reportsWithPriority })
+    res.status(200).json({
+      reports: reportsWithPriority,
+      pagination: buildPagination({ page, limit, total }),
+    })
   } catch (error) {
     const status = error.statusCode || 500
     res.status(status).json({ message: error.message || 'Server error fetching reports' })
@@ -324,15 +491,51 @@ export const getMyReports = async (req, res) => {
 export const getReportById = async (req, res) => {
   try {
     const { id } = req.params
+    let report
+    if (req.user.role === 'citizen') {
+      // First check within citizen's scope
+      report = await Report.findOne({
+        _id: id,
+        $or: [
+          { municipality: req.user.municipality },
+          { citizen: req.user.userId },
+          { reportedBy: req.user.userId },
+        ],
+      }).populate([
+        { path: 'category' },
+        { path: 'department' },
+        { path: 'municipality', select: 'name state' },
+        { path: 'citizen', select: 'name email' },
+        { path: 'reportedBy', select: 'name email' },
+        { path: 'assignedTo', select: 'name email department' },
+        { path: 'comments.author', select: 'name role' },
+      ])
 
-    const report = await findInScope(Report, req, id, [
-      { path: 'category' },
-      { path: 'department' },
-      { path: 'citizen', select: 'name email' },
-      { path: 'reportedBy', select: 'name email' },
-      { path: 'assignedTo', select: 'name email department' },
-      { path: 'comments.author', select: 'name role' },
-    ])
+      if (!report) {
+        return res.status(404).json({ message: 'Report not found' })
+      }
+    } else {
+      report = await findInScope(Report, req, id, [
+        { path: 'category' },
+        { path: 'department' },
+        { path: 'municipality', select: 'name state' },
+        { path: 'citizen', select: 'name email' },
+        { path: 'reportedBy', select: 'name email' },
+        { path: 'assignedTo', select: 'name email department' },
+        { path: 'comments.author', select: 'name role' },
+      ])
+    }
+
+    // Staff guard: staff can only read tickets assigned to them or tickets in their own department
+    // Specifically, staff cannot read external tickets or tickets assigned to others outside their department
+    if (req.user.role === 'staff') {
+      const isAssigned = report.assignedTo && report.assignedTo._id.toString() === req.user.userId.toString()
+      const staffUser = await findInScope(User, req, req.user.userId)
+      const isSameDept = staffUser?.department && report.department && staffUser.department.toString() === report.department._id.toString()
+      if (!isAssigned && !isSameDept) {
+        return res.status(403).json({ message: 'Access denied: staff cannot access tickets outside their assignment/department' })
+      }
+    }
 
     const daysOpen = calculateDaysOpen(report.createdAt)
     const severityWeight = report.category?.severityWeight || 1
@@ -345,6 +548,45 @@ export const getReportById = async (req, res) => {
 
     const reportObj = report.toObject()
     reportObj.priorityScore = priorityScore
+
+    // Part 8: Same-city report responses include handledBy: { name, agencyType, agencyCode, isExternal }
+    // and, if forwarded, agencyReference.
+    if (report.department) {
+      reportObj.handledBy = {
+        name: report.department.name || '',
+        agencyType: report.department.agencyType || 'municipal',
+        agencyCode: report.department.agencyCode || null,
+        isExternal: !!report.department.isExternal,
+      }
+    } else {
+      reportObj.handledBy = null
+    }
+
+    if (report.forwarding && report.forwarding.agencyReference) {
+      reportObj.agencyReference = report.forwarding.agencyReference
+    }
+    if (report.forwarding && report.forwarding.forwardedAt) {
+      reportObj.forwardedAt = report.forwarding.forwardedAt
+    }
+
+    // Admins additionally get routedBy and routingHistory.
+    // Citizens and staff never get routedBy, routingHistory, locationMatch, reporterHomeMunicipality, notes or staff private data.
+    if (req.user.role !== 'admin') {
+      delete reportObj.routedBy
+      delete reportObj.routingHistory
+      delete reportObj.locationMatch
+      delete reportObj.reporterHomeMunicipality
+      if (req.user.role === 'citizen') {
+        if (reportObj.assignedTo) {
+          reportObj.assignedTo = {
+            _id: reportObj.assignedTo._id,
+            name: reportObj.assignedTo.name,
+          }
+        }
+        // Expose only forwardedAt and agencyReference on root; never expose forwarding.note or forwarding.forwardedBy
+        delete reportObj.forwarding
+      }
+    }
 
     // If caller is another citizen and report is anonymous or not the reporter, sanitize reporter identity
     const isOwner = req.user.role === 'citizen' && (
@@ -378,7 +620,22 @@ export const addComment = async (req, res) => {
       return res.status(400).json({ message: 'Comment text is required' })
     }
 
-    const report = await findInScope(Report, req, id)
+    let report
+    if (userRole === 'citizen') {
+      report = await Report.findOne({
+        _id: id,
+        $or: [
+          { municipality: req.user.municipality },
+          { citizen: userId },
+          { reportedBy: userId },
+        ],
+      })
+      if (!report) {
+        return res.status(404).json({ message: 'Report not found' })
+      }
+    } else {
+      report = await findInScope(Report, req, id)
+    }
 
     const comment = {
       author: userId,
@@ -445,7 +702,16 @@ export const rateReport = async (req, res) => {
       return res.status(400).json({ message: 'Score must be a number between 1 and 5' })
     }
 
-    const report = await findInScope(Report, req, id)
+    let report = await Report.findOne({
+      _id: id,
+      $or: [
+        { municipality: req.user.municipality },
+        { citizen: userId },
+      ],
+    })
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
 
     if (report.citizen.toString() !== userId.toString()) {
       return res.status(403).json({ message: 'Only the report author can rate this report' })
@@ -483,7 +749,16 @@ export const disputeReport = async (req, res) => {
       return res.status(400).json({ message: 'Dispute reason is required' })
     }
 
-    const report = await findInScope(Report, req, id)
+    let report = await Report.findOne({
+      _id: id,
+      $or: [
+        { municipality: req.user.municipality },
+        { citizen: userId },
+      ],
+    })
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' })
+    }
 
     if (report.citizen.toString() !== userId.toString()) {
       return res.status(403).json({ message: 'Only the report author can dispute this report' })
@@ -542,12 +817,16 @@ export const getNearbyReports = async (req, res) => {
       return res.status(400).json({ message: 'Invalid lat/lng values' })
     }
 
+    // Cap nearby results at 200 to prevent unbounded loads
+    const NEARBY_CAP = 200
+
     const openReports = await Report.find({
       ...filter,
       status: { $in: ['reported', 'acknowledged', 'in_progress'] },
     })
       .populate('category', 'name severityWeight')
       .select('-citizen -reportedBy -comments -rating -disputeReason')
+      .lean()
 
     const { haversineDistance } = await import('../algorithms/duplicateDetection.js')
 
@@ -563,6 +842,7 @@ export const getNearbyReports = async (req, res) => {
       })
       .filter(({ distance }) => distance <= radiusMeters)
       .sort((a, b) => b.report.priorityScore - a.report.priorityScore)
+      .slice(0, NEARBY_CAP)
       .map(({ report, distance }) => {
         const daysOpen = calculateDaysOpen(report.createdAt)
         const severityWeight = report.category?.severityWeight || 1
@@ -570,7 +850,7 @@ export const getNearbyReports = async (req, res) => {
           reportCount: report.reportCount,
           severityWeight,
           daysOpen,
-          upvotes: report.upvotes.length,
+          upvotes: report.upvotes?.length || 0,
         })
 
         return {
@@ -581,7 +861,7 @@ export const getNearbyReports = async (req, res) => {
           photoUrl: report.photoUrl,
           location: report.location,
           status: report.status,
-          upvoteCount: report.upvotes.length,
+          upvoteCount: report.upvotes?.length || 0,
           reportCount: report.reportCount,
           priorityScore,
           distanceMeters: Math.round(distance),
@@ -599,37 +879,99 @@ export const getNearbyReports = async (req, res) => {
   }
 }
 
+// GET /api/reports/map (admin or authenticated staff, scoped to municipality)
+// Returns bounded map points with optional bounding box and hard cap (default 300, max 500)
+export const getMapReports = async (req, res) => {
+  try {
+    const filter = scopeFilter(req)
+    const { minLat, minLng, maxLat, maxLng, status, department, category, limit } = req.query
+
+    const query = { ...filter }
+
+    // Bounding box filter if supplied
+    if (minLat && minLng && maxLat && maxLng) {
+      const parsedMinLat = parseFloat(minLat)
+      const parsedMinLng = parseFloat(minLng)
+      const parsedMaxLat = parseFloat(maxLat)
+      const parsedMaxLng = parseFloat(maxLng)
+
+      if (![parsedMinLat, parsedMinLng, parsedMaxLat, parsedMaxLng].some(isNaN)) {
+        query['location.lat'] = { $gte: parsedMinLat, $lte: parsedMaxLat }
+        query['location.lng'] = { $gte: parsedMinLng, $lte: parsedMaxLng }
+      }
+    }
+
+    if (status && status !== 'all') {
+      if (status === 'open') {
+        query.status = { $ne: 'resolved' }
+      } else {
+        query.status = status
+      }
+    }
+
+    if (department) query.department = department
+    if (category) query.category = category
+
+    const cap = Math.min(Math.max(parseInt(limit, 10) || 300, 1), 500)
+
+    const reports = await Report.find(query)
+      .select('ticketId category department handledBy status isEscalated priorityScore location createdAt updatedAt')
+      .populate('category', 'name severityWeight')
+      .populate('department', 'name key agencyType isExternal')
+      .sort({ priorityScore: -1, createdAt: -1 })
+      .limit(cap)
+      .lean()
+
+    res.status(200).json({
+      count: reports.length,
+      cap,
+      reports,
+    })
+  } catch (error) {
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error fetching map reports' })
+  }
+}
+
 // Get staff's assigned tickets (staff only, in staff's municipality)
 export const getAssignedReports = async (req, res) => {
   try {
     const staffId = req.user.userId
     const filter = scopeFilter(req)
 
-    const reports = await Report.find({
-      ...filter,
-      assignedTo: staffId,
-    })
-      .populate('category', 'name severityWeight')
-      .populate('department', 'name')
-      .populate('citizen', 'name email')
-      .populate('assignedTo', 'name email')
-      .sort({ priorityScore: -1 })
+    const { parsePagination, buildPagination } = await import('../utils/pagination.js')
+    const { page, limit, skip } = parsePagination(req, { defaultLimit: 20, maxLimit: 100 })
 
-    const reportsWithPriority = reports.map((report) => {
-      const daysOpen = calculateDaysOpen(report.createdAt)
-      const severityWeight = report.category?.severityWeight || 1
-      const priorityScore = calculatePriorityScore({
-        reportCount: report.reportCount,
+    const queryFilter = { ...filter, assignedTo: staffId }
+    const [rawReports, total] = await Promise.all([
+      Report.find(queryFilter)
+        .populate('category', 'name severityWeight')
+        .populate('department', 'name')
+        .populate('citizen', 'name email')
+        .populate('assignedTo', 'name email')
+        .sort({ priorityScore: -1, createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Report.countDocuments(queryFilter),
+    ])
+
+    const reportsWithPriority = rawReports.map((r) => {
+      const daysOpen = calculateDaysOpen(r.createdAt)
+      const severityWeight = r.category?.severityWeight || 1
+      r.priorityScore = calculatePriorityScore({
+        reportCount: r.reportCount,
         severityWeight,
         daysOpen,
-        upvotes: report.upvotes.length,
+        upvotes: r.upvotes?.length || 0,
       })
-      const obj = report.toObject()
-      obj.priorityScore = priorityScore
-      return obj
+      return r
     })
 
-    res.status(200).json({ reports: reportsWithPriority })
+    res.status(200).json({
+      reports: reportsWithPriority,
+      pagination: buildPagination({ page, limit, total }),
+    })
   } catch (error) {
     const status = error.statusCode || 500
     res.status(status).json({ message: error.message || 'Server error fetching assigned reports' })
@@ -646,31 +988,39 @@ export const getDepartmentReports = async (req, res) => {
       return res.status(400).json({ message: 'Staff must be assigned to a department' })
     }
 
-    const reports = await Report.find({
-      ...filter,
-      department: staff.department,
-    })
-      .populate('category', 'name severityWeight')
-      .populate('department', 'name')
-      .populate('citizen', 'name email')
-      .populate('assignedTo', 'name email')
-      .sort({ priorityScore: -1 })
+    const { parsePagination, buildPagination } = await import('../utils/pagination.js')
+    const { page, limit, skip } = parsePagination(req, { defaultLimit: 20, maxLimit: 100 })
 
-    const reportsWithPriority = reports.map((report) => {
-      const daysOpen = calculateDaysOpen(report.createdAt)
-      const severityWeight = report.category?.severityWeight || 1
-      const priorityScore = calculatePriorityScore({
-        reportCount: report.reportCount,
+    const queryFilter = { ...filter, department: staff.department }
+    const [rawReports, total] = await Promise.all([
+      Report.find(queryFilter)
+        .populate('category', 'name severityWeight')
+        .populate('department', 'name')
+        .populate('citizen', 'name email')
+        .populate('assignedTo', 'name email')
+        .sort({ priorityScore: -1, createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Report.countDocuments(queryFilter),
+    ])
+
+    const reportsWithPriority = rawReports.map((r) => {
+      const daysOpen = calculateDaysOpen(r.createdAt)
+      const severityWeight = r.category?.severityWeight || 1
+      r.priorityScore = calculatePriorityScore({
+        reportCount: r.reportCount,
         severityWeight,
         daysOpen,
-        upvotes: report.upvotes.length,
+        upvotes: r.upvotes?.length || 0,
       })
-      const obj = report.toObject()
-      obj.priorityScore = priorityScore
-      return obj
+      return r
     })
 
-    res.status(200).json({ reports: reportsWithPriority })
+    res.status(200).json({
+      reports: reportsWithPriority,
+      pagination: buildPagination({ page, limit, total }),
+    })
   } catch (error) {
     const status = error.statusCode || 500
     res.status(status).json({ message: error.message || 'Server error fetching department reports' })
@@ -825,7 +1175,7 @@ export const updateStatus = async (req, res) => {
 // If departmentUnresolved is present, surfaces those first
 export const getAllReports = async (req, res) => {
   try {
-    const { status, department, category, escalated } = req.query
+    const { status, department, category, escalated, unresolved } = req.query
     const filter = scopeFilter(req)
 
     if (status) {
@@ -842,16 +1192,29 @@ export const getAllReports = async (req, res) => {
     } else if (escalated === 'false') {
       filter.isEscalated = false
     }
+    if (unresolved === 'true') {
+      filter.departmentUnresolved = true
+    } else if (unresolved === 'false') {
+      filter.departmentUnresolved = false
+    }
 
-    // Sort unresolved departments to the top, then by priority score and createdAt
-    const reports = await Report.find(filter)
-      .populate('category', 'name severityWeight slaHours departmentKey')
-      .populate('department', 'name key')
-      .populate('citizen', 'name email')
-      .populate('assignedTo', 'name email')
-      .sort({ departmentUnresolved: -1, priorityScore: -1, createdAt: -1 })
+    const { parsePagination, buildPagination } = await import('../utils/pagination.js')
+    const { page, limit, skip } = parsePagination(req, { defaultLimit: 20, maxLimit: 100 })
 
-    const enrichedReports = reports.map((r) => {
+    const [rawReports, total] = await Promise.all([
+      Report.find(filter)
+        .populate('category', 'name severityWeight slaHours departmentKey')
+        .populate('department', 'name key agencyType agencyCode isExternal')
+        .populate('citizen', 'name email')
+        .populate('assignedTo', 'name email')
+        .sort({ departmentUnresolved: -1, priorityScore: -1, createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Report.countDocuments(filter),
+    ])
+
+    const enrichedReports = rawReports.map((r) => {
       const daysOpen = calculateDaysOpen(r.createdAt)
       const severityWeight = r.category?.severityWeight || 1
       let calculatedPriority = calculatePriorityScore({
@@ -863,19 +1226,31 @@ export const getAllReports = async (req, res) => {
       if (r.isEscalated) {
         calculatedPriority += 50
       }
-      return {
-        ...r.toObject(),
-        priorityScore: calculatedPriority,
-        daysOpen,
+      r.priorityScore = calculatedPriority
+      r.daysOpen = daysOpen
+      if (r.department) {
+        r.handledBy = {
+          name: r.department.name || '',
+          agencyType: r.department.agencyType || 'municipal',
+          agencyCode: r.department.agencyCode || null,
+          isExternal: !!r.department.isExternal,
+        }
+      } else {
+        r.handledBy = null
       }
+      return r
     })
 
-    res.status(200).json({ reports: enrichedReports })
+    res.status(200).json({
+      reports: enrichedReports,
+      pagination: buildPagination({ page, limit, total }),
+    })
   } catch (error) {
     const status = error.statusCode || 500
     res.status(status).json({ message: error.message || 'Server error fetching reports' })
   }
 }
+
 
 // PATCH /api/reports/:id/assign (admin only, scoped to municipality)
 export const assignReport = async (req, res) => {
@@ -886,12 +1261,23 @@ export const assignReport = async (req, res) => {
 
     const report = await findInScope(Report, req, id, 'category department')
 
+    if (report.department && report.department.isExternal) {
+      const agencyName = report.department.name || report.department.agencyCode || 'external agency'
+      return res.status(409).json({
+        message: `Handled by ${agencyName}; cannot be assigned to city staff`,
+      })
+    }
+
     let targetStaff = null
 
     if (staffId) {
       targetStaff = await findInScope(User, req, staffId)
       if (targetStaff.role !== 'staff' || !targetStaff.isVerified) {
         return res.status(400).json({ message: 'Selected staff member is not valid or not verified' })
+      }
+      // Step 4: Check application status
+      if (targetStaff.applicationStatus !== 'approved') {
+        return res.status(400).json({ message: 'Selected staff member is not approved' })
       }
     } else {
       const deptId = report.department?._id || report.department
@@ -906,11 +1292,12 @@ export const assignReport = async (req, res) => {
         department: deptId,
         municipality: filter.municipality,
         isVerified: true,
+        applicationStatus: 'approved', // Step 4: Only approved staff
       })
 
       if (!deptStaff || deptStaff.length === 0) {
         return res.status(400).json({
-          message: 'No verified staff members found in this department for auto-assignment in your municipality',
+          message: 'No verified and approved staff members found in this department for auto-assignment in your municipality',
         })
       }
 
@@ -967,14 +1354,27 @@ export const assignReport = async (req, res) => {
 export const getDisputedReports = async (req, res) => {
   try {
     const filter = scopeFilter(req)
-    const disputedReports = await Report.find({ ...filter, status: 'disputed' })
-      .populate('category', 'name severityWeight slaHours')
-      .populate('department', 'name')
-      .populate('citizen', 'name email')
-      .populate('assignedTo', 'name email')
-      .sort({ updatedAt: -1 })
+    const { parsePagination, buildPagination } = await import('../utils/pagination.js')
+    const { page, limit, skip } = parsePagination(req, { defaultLimit: 20, maxLimit: 100 })
 
-    res.status(200).json({ reports: disputedReports })
+    const queryFilter = { ...filter, status: 'disputed' }
+    const [disputedReports, total] = await Promise.all([
+      Report.find(queryFilter)
+        .populate('category', 'name severityWeight slaHours')
+        .populate('department', 'name')
+        .populate('citizen', 'name email')
+        .populate('assignedTo', 'name email')
+        .sort({ updatedAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Report.countDocuments(queryFilter),
+    ])
+
+    res.status(200).json({
+      reports: disputedReports,
+      pagination: buildPagination({ page, limit, total }),
+    })
   } catch (error) {
     const status = error.statusCode || 500
     res.status(status).json({ message: error.message || 'Server error fetching disputed reports' })
@@ -1072,3 +1472,308 @@ export const resolveDispute = async (req, res) => {
     res.status(status).json({ message: error.message || 'Server error processing dispute resolution' })
   }
 }
+
+// PATCH /api/reports/:id/reassign-department (city admin only, tenant-scoped)
+export const reassignDepartment = async (req, res) => {
+  try {
+    const { id } = req.params
+    // Accept both targetDepartmentId (sent by the UI) and departmentId (legacy / test compatibility)
+    const { targetDepartmentId, departmentId: legacyDepartmentId, reason } = req.body
+    const departmentId = targetDepartmentId || legacyDepartmentId
+    const adminUser = req.user
+
+    if (!departmentId) {
+      return res.status(400).json({ message: 'Target departmentId is required' })
+    }
+
+    if (!reason || typeof reason !== 'string' || reason.trim().length < 5) {
+      return res.status(400).json({ message: 'A valid reason with at least 5 characters is required' })
+    }
+
+    const report = await findInScope(Report, req, id, 'department')
+
+    if (report.status === 'resolved' || report.status === 'closed') {
+      return res.status(409).json({ message: `Cannot reassign a report with status '${report.status}'` })
+    }
+
+    const targetDept = await Department.findOne({
+      _id: departmentId,
+      municipality: adminUser.municipality,
+    })
+
+    if (!targetDept) {
+      return res.status(404).json({ message: 'Target department not found in your municipality' })
+    }
+
+    if (targetDept.isExternal) {
+      return res.status(400).json({ message: 'Cannot reassign to an external agency department. Use forward instead.' })
+    }
+
+    if (!targetDept.isActive) {
+      return res.status(400).json({ message: 'Target department must be active' })
+    }
+
+    const oldDeptId = report.department?._id || report.department
+
+    // Clear previous assignee and forwarding
+    report.assignedTo = null
+    report.forwarding = null
+    report.department = targetDept._id
+    report.departmentUnresolved = false
+
+    // Auto-assign to staff member in target department
+    const deptStaff = await User.find({
+      role: 'staff',
+      department: targetDept._id,
+      municipality: adminUser.municipality,
+      isVerified: true,
+      applicationStatus: 'approved',
+    })
+
+    if (deptStaff.length > 0) {
+      const staffWorkloads = await Promise.all(
+        deptStaff.map(async (staff) => {
+          const openCount = await Report.countDocuments({
+            municipality: adminUser.municipality,
+            assignedTo: staff._id,
+            status: { $ne: 'resolved' },
+          })
+          return { staff, count: openCount }
+        })
+      )
+      staffWorkloads.sort((a, b) => a.count - b.count)
+      report.assignedTo = staffWorkloads[0].staff._id
+    }
+
+    // Append routing history
+    report.routingHistory.push({
+      at: new Date(),
+      action: 'reassign',
+      fromDepartment: oldDeptId,
+      toDepartment: targetDept._id,
+      byUser: adminUser.userId,
+      reason: reason.trim(),
+    })
+
+    await report.save()
+
+    // Audit log
+    const AuditLog = (await import('../models/AuditLog.js')).default
+    await AuditLog.create({
+      actor: adminUser.userId,
+      actorEmail: adminUser.email,
+      action: 'report.reassign_department',
+      targetMunicipality: adminUser.municipality,
+      targetUser: report.citizen,
+      meta: {
+        reportId: report._id,
+        ticketId: report.ticketId,
+        fromDepartment: oldDeptId,
+        toDepartment: targetDept._id,
+        toDepartmentName: targetDept.name,
+        assignedTo: report.assignedTo,
+        reason: reason.trim(),
+      },
+    })
+
+    // Notify citizen
+    const { notifyUser } = await import('../utils/notify.js')
+    notifyUser(report.citizen, 'report_reassigned', {
+      reportId: report._id,
+      ticketId: report.ticketId,
+      message: `Your report has been reassigned to ${targetDept.name}`,
+    })
+
+    res.status(200).json({
+      message: 'Report successfully reassigned to new department',
+      report,
+    })
+  } catch (error) {
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error reassigning department' })
+  }
+}
+
+// POST /api/reports/:id/forward (city admin only, tenant-scoped)
+export const forwardReport = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { departmentId, agencyReference, note } = req.body
+    const adminUser = req.user
+
+    if (!departmentId) {
+      return res.status(400).json({ message: 'Target agency departmentId is required' })
+    }
+
+    if (!note || typeof note !== 'string' || note.trim().length < 5) {
+      return res.status(400).json({ message: 'A forwarding note with at least 5 characters is required' })
+    }
+
+    if (agencyReference && typeof agencyReference === 'string' && agencyReference.length > 100) {
+      return res.status(400).json({ message: 'Agency reference cannot exceed 100 characters' })
+    }
+
+    const report = await findInScope(Report, req, id, 'department')
+
+    if (report.status === 'resolved' || report.status === 'closed') {
+      return res.status(409).json({ message: `Cannot forward a report with status '${report.status}'` })
+    }
+
+    const targetAgency = await Department.findOne({
+      _id: departmentId,
+      municipality: adminUser.municipality,
+    })
+
+    if (!targetAgency) {
+      return res.status(404).json({ message: 'Target agency not found in your municipality' })
+    }
+
+    if (!targetAgency.isExternal) {
+      return res.status(400).json({ message: 'Cannot forward to a municipal department. Target must be an external agency.' })
+    }
+
+    if (!targetAgency.isActive) {
+      return res.status(400).json({ message: 'Target agency department must be active' })
+    }
+
+    const oldDeptId = report.department?._id || report.department
+
+    report.department = targetAgency._id
+    report.departmentUnresolved = false
+    report.assignedTo = null
+
+    report.forwarding = {
+      forwardedAt: new Date(),
+      forwardedBy: adminUser.userId,
+      agencyReference: agencyReference ? agencyReference.trim() : '',
+      note: note.trim(),
+    }
+
+    report.routingHistory.push({
+      at: new Date(),
+      action: 'forward',
+      fromDepartment: oldDeptId,
+      toDepartment: targetAgency._id,
+      byUser: adminUser.userId,
+      reason: note.trim(),
+    })
+
+    await report.save()
+
+    // Audit log
+    const AuditLog = (await import('../models/AuditLog.js')).default
+    await AuditLog.create({
+      actor: adminUser.userId,
+      actorEmail: adminUser.email,
+      action: 'report.forward_external',
+      targetMunicipality: adminUser.municipality,
+      targetUser: report.citizen,
+      meta: {
+        reportId: report._id,
+        ticketId: report.ticketId,
+        agencyId: targetAgency._id,
+        agencyName: targetAgency.name,
+        agencyCode: targetAgency.agencyCode,
+        agencyReference: report.forwarding.agencyReference,
+        note: note.trim(),
+      },
+    })
+
+    // Notify citizen
+    const { notifyUser } = await import('../utils/notify.js')
+    notifyUser(report.citizen, 'report_forwarded', {
+      reportId: report._id,
+      ticketId: report.ticketId,
+      agencyName: targetAgency.name,
+      agencyReference: report.forwarding.agencyReference,
+      message: `Your report has been forwarded to external agency: ${targetAgency.name}`,
+    })
+
+    res.status(200).json({
+      message: 'Report successfully forwarded to external agency',
+      report,
+    })
+  } catch (error) {
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error forwarding report' })
+  }
+}
+
+// PATCH /api/reports/:id/external-status (city admin only, tenant-scoped)
+export const updateExternalStatus = async (req, res) => {
+  try {
+    const { id } = req.params
+    const { status, note } = req.body
+    const adminUser = req.user
+
+    const ALLOWED_STATUSES = ['acknowledged', 'in_progress', 'resolved']
+    if (!status || !ALLOWED_STATUSES.includes(status)) {
+      return res.status(400).json({
+        message: `Invalid status. Must be one of: ${ALLOWED_STATUSES.join(', ')}`,
+      })
+    }
+
+    if (!note || typeof note !== 'string' || note.trim().length < 10) {
+      return res.status(400).json({ message: 'A note of at least 10 characters is required' })
+    }
+
+    const report = await findInScope(Report, req, id, 'department')
+
+    if (report.status === 'resolved' || report.status === 'closed') {
+      return res.status(409).json({ message: `Cannot update external status for report with status '${report.status}'` })
+    }
+
+    if (!report.department || !report.department.isExternal) {
+      return res.status(409).json({ message: 'This action is only allowed on reports handled by an external agency' })
+    }
+
+    report.status = status
+    if (status === 'resolved') {
+      report.resolvedAt = new Date()
+    }
+
+    report.comments.push({
+      author: adminUser.userId,
+      authorRole: 'admin',
+      text: `[External Agency Status Update: ${status}] ${note.trim()}`,
+      createdAt: new Date(),
+    })
+
+    await report.save()
+
+    // Audit log
+    const AuditLog = (await import('../models/AuditLog.js')).default
+    await AuditLog.create({
+      actor: adminUser.userId,
+      actorEmail: adminUser.email,
+      action: 'report.external_status_update',
+      targetMunicipality: adminUser.municipality,
+      targetUser: report.citizen,
+      meta: {
+        reportId: report._id,
+        ticketId: report.ticketId,
+        newStatus: status,
+        agencyName: report.department.name,
+        note: note.trim(),
+      },
+    })
+
+    // Notify citizen
+    const { notifyUser } = await import('../utils/notify.js')
+    notifyUser(report.citizen, 'status_updated', {
+      reportId: report._id,
+      ticketId: report.ticketId,
+      status,
+      message: `Status updated to ${status} for report handled by ${report.department.name}`,
+    })
+
+    res.status(200).json({
+      message: `External ticket status updated to '${status}' successfully`,
+      report,
+    })
+  } catch (error) {
+    const status = error.statusCode || 500
+    res.status(status).json({ message: error.message || 'Server error updating external report status' })
+  }
+}
+

@@ -3,7 +3,11 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
 import Municipality from '../models/Municipality.js'
+import Department from '../models/Department.js'
+import AuditLog from '../models/AuditLog.js'
 import { sendOTPEmail, sendWelcomeEmail } from '../utils/sendEmail.js'
+import { notifyAdmins } from '../utils/notify.js'
+import { getCityStatus } from '../utils/cityStatus.js'
 
 // Generate 6-digit OTP
 const generateOTP = () => {
@@ -24,19 +28,66 @@ const generateToken = (user) => {
   )
 }
 
-// Register (Citizen only)
+// Register (Citizen or Staff only - Step 3)
 export const register = async (req, res) => {
   try {
-    const { name, email, password, phone, state, city, municipality, homeAddress } = req.body
+    const { name, email, password, phone, state, city, municipality, homeAddress, role, department, employeeId, designation } = req.body
 
-    // Validate municipality is required for citizen
+    // Validate role - only citizen or staff allowed
+    if (!role || !['citizen', 'staff'].includes(role)) {
+      return res.status(400).json({ message: 'Invalid role. Only citizen or staff registration is allowed.' })
+    }
+
+    // Validate municipality is required
     if (!municipality) {
       return res.status(400).json({ message: 'City/Municipality selection is required' })
     }
 
-    const muniDoc = await Municipality.findOne({ _id: municipality, isActive: true })
+    const muniDoc = await Municipality.findOne({ _id: municipality })
     if (!muniDoc) {
       return res.status(400).json({ message: 'Invalid or inactive municipality selected' })
+    }
+
+    const { isLive } = await getCityStatus(muniDoc._id)
+    if (!isLive) {
+      return res.status(403).json({ message: 'This city is not live on Nivaran yet' })
+    }
+
+    // Staff-specific validations
+    let deptDoc = null
+    if (role === 'staff') {
+      // Department is required for staff
+      if (!department) {
+        return res.status(400).json({ message: 'Department selection is required for staff registration' })
+      }
+
+      // Validate department belongs to the chosen municipality
+      deptDoc = await Department.findOne({ _id: department, municipality: muniDoc._id })
+      if (!deptDoc) {
+        return res.status(400).json({ message: 'Invalid department for the selected municipality' })
+      }
+      if (deptDoc.isExternal) {
+        return res.status(400).json({ message: 'Staff cannot be registered for an external agency department' })
+      }
+
+      // employeeId is required for staff
+      if (!employeeId || !employeeId.trim()) {
+        return res.status(400).json({ message: 'Employee ID is required for staff registration' })
+      }
+
+      // designation is required for staff
+      if (!designation || !designation.trim()) {
+        return res.status(400).json({ message: 'Designation is required for staff registration' })
+      }
+
+      // Check for duplicate employeeId in the same municipality
+      const existingEmployeeId = await User.findOne({
+        municipality: muniDoc._id,
+        employeeId: employeeId.trim(),
+      })
+      if (existingEmployeeId) {
+        return res.status(409).json({ message: 'Employee ID already exists in this municipality' })
+      }
     }
 
     // Validate phone format (Indian format: +91XXXXXXXXXX) if provided
@@ -50,7 +101,7 @@ export const register = async (req, res) => {
     // Check if user already exists
     const existingUser = await User.findOne({ email })
     if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' })
+      return res.status(409).json({ message: 'Email already registered' })
     }
 
     // Hash password
@@ -66,7 +117,7 @@ export const register = async (req, res) => {
       name,
       email,
       passwordHash,
-      role: 'citizen',
+      role,
       municipality: muniDoc._id,
       state: muniDoc.state || state,
       city: muniDoc.name || city,
@@ -88,17 +139,57 @@ export const register = async (req, res) => {
       userData.phone = phone
     }
 
+    // Staff-specific fields
+    if (role === 'staff') {
+      userData.department = department
+      userData.employeeId = employeeId.trim()
+      userData.designation = designation.trim()
+      userData.applicationStatus = 'pending'
+      userData.appliedAt = new Date()
+    }
+
     const user = await User.create(userData)
 
     // Send OTP email
     await sendOTPEmail(email, otp)
 
+    // Step 3: Emit real-time notification to admins for new staff application
+    if (role === 'staff') {
+      await notifyAdmins(muniDoc._id, 'staff_application', {
+        applicantId: user._id,
+        name: user.name,
+        email: user.email,
+        department: deptDoc?.name || 'Department',
+        employeeId: user.employeeId,
+        municipality: muniDoc.name,
+        message: `New staff application from ${user.name} (${user.employeeId})`,
+      })
+
+      // Write audit log for staff application
+      await AuditLog.create({
+        actor: user._id,
+        actorEmail: user.email,
+        action: 'staff.apply',
+        targetMunicipality: muniDoc._id,
+        targetUser: user._id,
+        meta: {
+          email: user.email,
+          employeeId: user.employeeId,
+          department: deptDoc?.name,
+        },
+      })
+    }
+
     res.status(201).json({
       message: 'Registration successful. Please verify your email with the OTP sent to your email address.',
       email: user.email,
+      role: user.role,
     })
   } catch (error) {
     console.error('Register error:', error)
+    if (error.code === 11000) {
+      return res.status(409).json({ message: 'Email or Employee ID already exists' })
+    }
     res.status(500).json({ message: 'Server error during registration' })
   }
 }
@@ -133,7 +224,25 @@ export const verifyOTP = async (req, res) => {
     // Send welcome email
     await sendWelcomeEmail(email, user.name)
 
-    // Generate JWT
+    // Step 3: For staff, do NOT issue token if status is pending or rejected
+    if (user.role === 'staff') {
+      if (user.applicationStatus === 'pending') {
+        return res.status(200).json({
+          message: 'Email verified successfully. Your application is waiting for approval by the city administration.',
+          requiresApproval: true,
+          applicationStatus: 'pending',
+        })
+      }
+      if (user.applicationStatus === 'rejected') {
+        return res.status(403).json({
+          message: `Your application has been rejected. ${user.rejectionReason || 'Contact the city administration for more information.'}`,
+          applicationStatus: 'rejected',
+          rejectionReason: user.rejectionReason,
+        })
+      }
+    }
+
+    // Generate JWT for citizens and approved staff
     const token = generateToken(user)
 
     res.status(200).json({
@@ -216,6 +325,24 @@ export const login = async (req, res) => {
     // Reject inactive accounts
     if (user.isActive === false) {
       return res.status(403).json({ message: 'Your account has been deactivated. Contact the Super Admin.' })
+    }
+
+    // Step 3: Check staff application status
+    if (user.role === 'staff') {
+      if (user.applicationStatus === 'pending') {
+        const cityName = user.municipality?.name || 'your city'
+        return res.status(403).json({
+          message: `Your application is waiting for approval by the ${cityName} administration.`,
+          applicationStatus: 'pending',
+        })
+      }
+      if (user.applicationStatus === 'rejected') {
+        return res.status(403).json({
+          message: user.rejectionReason || 'Your application has been rejected. Contact the city administration for more information.',
+          applicationStatus: 'rejected',
+          rejectionReason: user.rejectionReason,
+        })
+      }
     }
 
     // Check password

@@ -10,6 +10,7 @@ function AdminDashboard() {
   const { socket } = useSocket()
   const [reports, setReports] = useState([])
   const [disputedReports, setDisputedReports] = useState([])
+  const [setupStatus, setSetupStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -39,12 +40,14 @@ function AdminDashboard() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true)
-      const [reportsRes, disputedRes] = await Promise.all([
+      const [reportsRes, disputedRes, setupRes] = await Promise.allSettled([
         api.get('/api/reports'),
         api.get('/api/reports/disputed'),
+        api.get('/api/admin/setup-status'),
       ])
-      setReports(reportsRes.data.reports || [])
-      setDisputedReports(disputedRes.data.reports || [])
+      if (reportsRes.status === 'fulfilled') setReports(reportsRes.value.data.reports || [])
+      if (disputedRes.status === 'fulfilled') setDisputedReports(disputedRes.value.data.reports || [])
+      if (setupRes.status === 'fulfilled') setSetupStatus(setupRes.value.data || null)
     } catch (err) {
       console.error('Failed to load dashboard data:', err)
       setError('Failed to fetch dashboard data. Make sure server is running.')
@@ -114,6 +117,165 @@ function AdminDashboard() {
         </div>
 
         {error && <div className="alert-error">{error}</div>}
+
+        {/* "Set up your city" Checklist Card (Shown while ready is false) */}
+        {setupStatus && !setupStatus.ready && (
+          <div className="card-nivaran p-6 border-l-4 border-l-kesariya bg-gradient-to-r from-kesariya/5 to-transparent shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">⚙️</span>
+                  <h2 className="font-display text-lg font-bold text-sovereign-indigo">
+                    Set up your city ({setupStatus.completion}% Complete)
+                  </h2>
+                </div>
+                <p className="text-xs text-gray-600 mt-1">
+                  Complete these items before your city can route civic reports smoothly to departments and agencies.
+                </p>
+              </div>
+              <div className="w-full sm:w-48 bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                <div
+                  className="bg-kesariya h-2.5 rounded-full transition-all duration-500"
+                  style={{ width: `${setupStatus.completion}%` }}
+                ></div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              {/* Sectors without primary */}
+              <div className="p-3.5 rounded-lg border border-gray-200/70 bg-white">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-700">
+                    Sectors without Primary Department:
+                  </span>
+                  <span
+                    className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      setupStatus.sectorsWithoutPrimary.length === 0
+                        ? 'bg-jan-kalyan-green/10 text-jan-kalyan-green'
+                        : 'bg-terracotta-alert/10 text-terracotta-alert'
+                    }`}
+                  >
+                    {setupStatus.sectorsWithoutPrimary.length === 0
+                      ? '✓ All Set'
+                      : `${setupStatus.sectorsWithoutPrimary.length} Missing`}
+                  </span>
+                </div>
+                {setupStatus.sectorsWithoutPrimary.length > 0 && (
+                  <div className="mt-2 text-xs text-gray-600">
+                    <p className="truncate">
+                      Missing: {setupStatus.sectorsWithoutPrimary.map((s) => s.name).join(', ')}
+                    </p>
+                    <button
+                      onClick={() => navigate('/admin/departments')}
+                      className="text-kesariya hover:underline font-semibold mt-1 inline-block"
+                    >
+                      Assign Primary Departments →
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Unverified external agencies */}
+              <div className="p-3.5 rounded-lg border border-gray-200/70 bg-white">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-700">
+                    Unverified External Agencies:
+                  </span>
+                  <span
+                    className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      setupStatus.unverifiedAgencies.count === 0
+                        ? 'bg-jan-kalyan-green/10 text-jan-kalyan-green'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {setupStatus.unverifiedAgencies.count === 0
+                      ? '✓ All Verified'
+                      : `${setupStatus.unverifiedAgencies.count} Pending`}
+                  </span>
+                </div>
+                {setupStatus.unverifiedAgencies.count > 0 && (
+                  <div className="mt-2 text-xs text-gray-600">
+                    <p className="truncate">
+                      {setupStatus.unverifiedAgencies.names.join(', ')}
+                    </p>
+                    <button
+                      onClick={() => navigate('/admin/departments?type=external')}
+                      className="text-kesariya hover:underline font-semibold mt-1 inline-block"
+                    >
+                      Verify Agency Details →
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Municipal departments without staff */}
+              <div className="p-3.5 rounded-lg border border-gray-200/70 bg-white">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-700">
+                    Municipal Depts without Staff:
+                  </span>
+                  <span
+                    className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      setupStatus.municipalDepartmentsWithoutStaff.length === 0
+                        ? 'bg-jan-kalyan-green/10 text-jan-kalyan-green'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {setupStatus.municipalDepartmentsWithoutStaff.length === 0
+                      ? '✓ Staffed'
+                      : `${setupStatus.municipalDepartmentsWithoutStaff.length} Unstaffed`}
+                  </span>
+                </div>
+                {setupStatus.municipalDepartmentsWithoutStaff.length > 0 && (
+                  <div className="mt-2 text-xs text-gray-600">
+                    <p className="truncate">
+                      Depts: {setupStatus.municipalDepartmentsWithoutStaff.map((d) => d.name).join(', ')}
+                    </p>
+                    <button
+                      onClick={() => navigate('/admin/staff')}
+                      className="text-kesariya hover:underline font-semibold mt-1 inline-block"
+                    >
+                      Review Staff Applications ({setupStatus.pendingStaffApplications} pending) →
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Unroutable categories */}
+              <div className="p-3.5 rounded-lg border border-gray-200/70 bg-white">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-700">
+                    Unroutable Categories:
+                  </span>
+                  <span
+                    className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      setupStatus.unroutableCategories.length === 0
+                        ? 'bg-jan-kalyan-green/10 text-jan-kalyan-green'
+                        : 'bg-terracotta-alert/10 text-terracotta-alert'
+                    }`}
+                  >
+                    {setupStatus.unroutableCategories.length === 0
+                      ? '✓ None'
+                      : `${setupStatus.unroutableCategories.length} Categories`}
+                  </span>
+                </div>
+                {setupStatus.unroutableCategories.length > 0 && (
+                  <div className="mt-2 text-xs text-gray-600">
+                    <p className="truncate">
+                      Cannot resolve: {setupStatus.unroutableCategories.map((c) => c.name).join(', ')}
+                    </p>
+                    <button
+                      onClick={() => navigate('/admin/departments')}
+                      className="text-kesariya hover:underline font-semibold mt-1 inline-block"
+                    >
+                      Resolve Categories via Primary Depts →
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 4 Quick Stat Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">

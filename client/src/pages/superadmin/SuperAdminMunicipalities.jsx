@@ -261,7 +261,7 @@ function SuperAdminMunicipalities() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['City', 'State', 'Type', 'Admins', 'Status', 'Actions'].map((h) => (
+                {['City', 'State', 'Type', 'Admins', 'Active', 'Live Status', 'Actions'].map((h) => (
                   <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600 text-xs uppercase tracking-wide">
                     {h}
                   </th>
@@ -272,7 +272,12 @@ function SuperAdminMunicipalities() {
               {munis.map((m) => (
                 <tr key={m._id} className="hover:bg-gray-50/50 transition-colors">
                   <td className="px-4 py-3 font-medium text-sovereign-indigo">
-                    {m.name}
+                    <button
+                      onClick={() => navigate(`/superadmin/municipalities/${m._id}`)}
+                      className="hover:underline text-left font-semibold"
+                    >
+                      {m.name}
+                    </button>
                     {m.nameLocal && <span className="text-gray-400 ml-1 font-normal text-xs">({m.nameLocal})</span>}
                   </td>
                   <td className="px-4 py-3 text-gray-600">{m.state}</td>
@@ -290,13 +295,33 @@ function SuperAdminMunicipalities() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 flex-wrap">
+                    {m.isLive ? (
+                      <span className="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                        Live
+                      </span>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1 w-fit">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-600" />
+                          Not Live
+                        </span>
+                        {m.reasons && m.reasons.length > 0 && (
+                          <span className="text-[10px] text-gray-400">
+                            {m.reasons.map((r) => r.replace(/_/g, ' ')).join(', ')}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       <button
-                        onClick={() => openAdmins(m)}
-                        className="text-xs text-blue-600 hover:underline font-medium"
-                        title="Manage city admins"
+                        onClick={() => navigate(`/superadmin/municipalities/${m._id}`)}
+                        className="text-xs text-kesariya hover:underline font-semibold"
+                        title="View details & checklist"
                       >
-                        Admins
+                        Details
                       </button>
                       <button
                         onClick={() => openEdit(m)}

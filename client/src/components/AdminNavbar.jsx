@@ -1,6 +1,8 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import NotificationBell from './NotificationBell'
+import { useState, useEffect } from 'react'
+import api from '../utils/api'
 
 const NAV_ITEMS = [
   { name: 'Dashboard',       nameHi: 'डैशबोर्ड',  path: '/admin',              end: true },
@@ -9,12 +11,25 @@ const NAV_ITEMS = [
   { name: 'All Tickets',     nameHi: 'टिकट',       path: '/admin/tickets' },
   { name: 'Disputes',        nameHi: 'विवाद',      path: '/admin/disputes' },
   { name: 'Staff',           nameHi: 'कर्मचारी',   path: '/admin/staff' },
-  { name: 'Dept & Categories', nameHi: 'विभाग',   path: '/admin/departments' },
+  { name: 'Departments',     nameHi: 'विभाग',     path: '/admin/departments' },
 ]
 
 function AdminNavbar() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const [pendingCount, setPendingCount] = useState(0)
+
+  useEffect(() => {
+    const fetchPendingCount = async () => {
+      try {
+        const res = await api.get('/api/staff/applications?status=pending&limit=1')
+        setPendingCount(res.data.total || 0)
+      } catch (err) {
+        console.error('Failed to fetch pending count:', err)
+      }
+    }
+    fetchPendingCount()
+  }, [])
 
   const handleLogout = () => {
     logout()
@@ -49,7 +64,7 @@ function AdminNavbar() {
                 to={item.path}
                 end={item.end}
                 className={({ isActive }) =>
-                  `px-3 py-2 rounded text-sm font-medium transition-all ${
+                  `px-3 py-2 rounded text-sm font-medium transition-all relative ${
                     isActive
                       ? 'bg-white/15 text-white font-semibold border-b-2 border-kesariya'
                       : 'text-white/70 hover:text-white hover:bg-white/10'
@@ -57,6 +72,11 @@ function AdminNavbar() {
                 }
               >
                 {item.name}
+                {item.name === 'Staff' && pendingCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-kesariya text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                    {pendingCount}
+                  </span>
+                )}
               </NavLink>
             ))}
           </nav>

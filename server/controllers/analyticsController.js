@@ -12,29 +12,63 @@ import { scopeFilter } from '../utils/scope.js'
 export const getOverviewAnalytics = async (req, res) => {
   try {
     const filter = scopeFilter(req)
-    const totalReports = await Report.countDocuments(filter)
-    const resolvedReportsCount = await Report.countDocuments({ ...filter, status: 'resolved' })
+
+    const [stats] = await Report.aggregate([
+      { $match: filter },
+      {
+        $facet: {
+          totals: [
+            {
+              $group: {
+                _id: null,
+                totalReports: { $sum: 1 },
+                resolvedReports: {
+                  $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] },
+                },
+              },
+            },
+          ],
+          avgResolution: [
+            {
+              $match: {
+                status: 'resolved',
+                $or: [{ resolvedAt: { $ne: null } }, { updatedAt: { $ne: null } }],
+              },
+            },
+            {
+              $project: {
+                resolutionTime: {
+                  $divide: [
+                    {
+                      $subtract: [
+                        { $ifNull: ['$resolvedAt', '$updatedAt'] },
+                        '$createdAt',
+                      ],
+                    },
+                    1000 * 60 * 60,
+                  ],
+                },
+              },
+            },
+            {
+              $match: { resolutionTime: { $gte: 0 } },
+            },
+            {
+              $group: {
+                _id: null,
+                avgHours: { $avg: '$resolutionTime' },
+              },
+            },
+          ],
+        },
+      },
+    ])
+
+    const totalReports = stats?.totals?.[0]?.totalReports || 0
+    const resolvedReportsCount = stats?.totals?.[0]?.resolvedReports || 0
     const openReportsCount = totalReports - resolvedReportsCount
-
-    // Average resolution time (hours) for resolved reports
-    const resolvedReports = await Report.find({ ...filter, status: 'resolved' }).select('createdAt resolvedAt updatedAt')
-
-    let totalResolutionHours = 0
-    let validResolvedCount = 0
-
-    for (const r of resolvedReports) {
-      const completionTime = r.resolvedAt || r.updatedAt
-      if (completionTime && r.createdAt) {
-        const diffHours = (new Date(completionTime) - new Date(r.createdAt)) / (1000 * 60 * 60)
-        if (diffHours >= 0) {
-          totalResolutionHours += diffHours
-          validResolvedCount++
-        }
-      }
-    }
-
-    const avgResolutionHours = validResolvedCount > 0
-      ? Number((totalResolutionHours / validResolvedCount).toFixed(1))
+    const avgResolutionHours = stats?.avgResolution?.[0]?.avgHours
+      ? Number(stats.avgResolution[0].avgHours.toFixed(1))
       : 0
 
     res.status(200).json({
@@ -51,40 +85,44 @@ export const getOverviewAnalytics = async (req, res) => {
 
 /**
  * 2. GET /api/analytics/by-category (admin only)
- * Count of reports grouped by category in this municipality
+ * Count of reports grouped by category in this municipality using aggregation
  */
 export const getCategoryAnalytics = async (req, res) => {
   try {
     const filter = scopeFilter(req)
-    const categories = await Category.find().select('name')
-    const reports = await Report.find(filter).select('category status')
 
-    const categoryMap = {}
-    categories.forEach((cat) => {
-      categoryMap[cat._id.toString()] = {
+    const [categories, reportStats] = await Promise.all([
+      Category.find().select('name').lean(),
+      Report.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: '$category',
+            total: { $sum: 1 },
+            resolved: {
+              $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] },
+            },
+            open: {
+              $sum: { $cond: [{ $ne: ['$status', 'resolved'] }, 1, 0] },
+            },
+          },
+        },
+      ]),
+    ])
+
+    const statsMap = new Map(reportStats.map((s) => [s._id ? s._id.toString() : null, s]))
+
+    const result = categories.map((cat) => {
+      const s = statsMap.get(cat._id.toString())
+      return {
         name: cat.name,
-        total: 0,
-        resolved: 0,
-        open: 0,
+        total: s?.total || 0,
+        resolved: s?.resolved || 0,
+        open: s?.open || 0,
       }
     })
 
-    reports.forEach((r) => {
-      if (r.category) {
-        const catId = r.category.toString()
-        if (!categoryMap[catId]) {
-          categoryMap[catId] = { name: 'Other', total: 0, resolved: 0, open: 0 }
-        }
-        categoryMap[catId].total += 1
-        if (r.status === 'resolved') {
-          categoryMap[catId].resolved += 1
-        } else {
-          categoryMap[catId].open += 1
-        }
-      }
-    })
-
-    const result = Object.values(categoryMap).sort((a, b) => b.total - a.total)
+    result.sort((a, b) => b.total - a.total)
     res.status(200).json({ categories: result })
   } catch (error) {
     const status = error.statusCode || 500
@@ -248,7 +286,7 @@ export const getTrendAnalytics = async (req, res) => {
 export const getStaffLeaderboard = async (req, res) => {
   try {
     const filter = scopeFilter(req)
-    const staffMembers = await User.find({ role: 'staff', municipality: filter.municipality })
+    const staffMembers = await User.find({ role: 'staff', municipality: filter.municipality, applicationStatus: 'approved' })
       .populate('department', 'name')
       .select('name email department')
 

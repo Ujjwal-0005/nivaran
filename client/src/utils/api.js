@@ -18,4 +18,20 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// Normalize error messages from API
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const message =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      'A network or server error occurred'
+    const enhancedError = new Error(message)
+    enhancedError.response = error.response
+    enhancedError.status = error.response?.status
+    return Promise.reject(enhancedError)
+  }
+)
+
 export default api

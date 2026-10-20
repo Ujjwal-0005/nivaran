@@ -33,7 +33,6 @@ const municipalitySchema = new mongoose.Schema({
   },
   lgdCode: {
     type: String,
-    default: null,
     sparse: true,
     unique: true,
   },
@@ -50,6 +49,10 @@ const municipalitySchema = new mongoose.Schema({
   defaultZoom: {
     type: Number,
     default: 13,
+  },
+  centroidApproximate: {
+    type: Boolean,
+    default: false,
   },
   subdivisions: [subdivisionSchema],
   isActive: {

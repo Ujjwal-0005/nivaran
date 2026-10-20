@@ -4,16 +4,18 @@ import api from '../../utils/api'
 import { useSocket } from '../../context/SocketContext'
 import CitizenNavbar from '../../components/CitizenNavbar'
 import StatusBadge from '../../components/StatusBadge'
+import PaginationControls from '../../components/PaginationControls'
 import { getDeptColor } from '../../utils/deptColors'
 
 function MyReports() {
   const [reports, setReports] = useState([])
+  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const { socket } = useSocket()
   const navigate = useNavigate()
 
-  useEffect(() => { fetchMyReports() }, [])
+  useEffect(() => { fetchMyReports(1) }, [])
 
   // Live status updates via Socket.io
   useEffect(() => {
@@ -31,11 +33,14 @@ function MyReports() {
     return () => { socket.off('status_update', handleStatusUpdate) }
   }, [socket])
 
-  const fetchMyReports = async () => {
+  const fetchMyReports = async (page = 1) => {
     try {
       setLoading(true)
-      const response = await api.get('/api/reports/mine')
-      setReports(response.data.reports)
+      const response = await api.get('/api/reports/mine', { params: { page, limit: 20 } })
+      setReports(response.data.reports || [])
+      if (response.data.pagination) {
+        setPagination(response.data.pagination)
+      }
     } catch {
       setError('Failed to fetch reports')
     } finally {
@@ -118,7 +123,14 @@ function MyReports() {
                     {/* Top row */}
                     <div className="flex items-start justify-between gap-2 mb-3">
                       <div className="min-w-0">
-                        <p className="font-mono text-xs font-bold text-gray-500 truncate">{report.ticketId}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-mono text-xs font-bold text-gray-500 truncate">{report.ticketId}</p>
+                          {report.municipality?.name && (
+                            <span className="text-[10px] bg-parchment text-earthen-slate-dark font-medium px-1.5 py-0.5 rounded border border-earthen-slate">
+                              {report.municipality.name}
+                            </span>
+                          )}
+                        </div>
                         <p className="font-semibold text-sovereign-indigo text-sm mt-0.5 truncate">
                           {report.category?.name || 'Issue'}
                         </p>
@@ -171,6 +183,13 @@ function MyReports() {
                 )
               })}
             </div>
+            <PaginationControls
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              total={pagination.total}
+              limit={pagination.limit}
+              onPageChange={(newPage) => fetchMyReports(newPage)}
+            />
           </>
         )}
       </main>

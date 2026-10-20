@@ -9,6 +9,7 @@ import {
   rateReport,
   disputeReport,
   getNearbyReports,
+  getMapReports,
   getAssignedReports,
   getDepartmentReports,
   updateStatus,
@@ -16,6 +17,9 @@ import {
   assignReport,
   getDisputedReports,
   resolveDispute,
+  reassignDepartment,
+  forwardReport,
+  updateExternalStatus,
 } from '../controllers/reportController.js'
 import { auth } from '../middleware/auth.js'
 import { roleCheck } from '../middleware/roleCheck.js'
@@ -36,6 +40,9 @@ router.get('/', auth, roleCheck('admin'), getAllReports)
 
 // Get nearby open reports (any logged-in user)
 router.get('/nearby', auth, getNearbyReports)
+
+// Bounded map reports with optional bounding box and cap (staff & admin)
+router.get('/map', auth, getMapReports)
 
 // Get citizen's own reports (citizen only)
 router.get('/mine', auth, roleCheck('citizen'), getMyReports)
@@ -72,6 +79,15 @@ router.post('/:id/dispute', auth, roleCheck('citizen'), disputeReport)
 
 // Phase 7: Assign ticket to staff (admin only)
 router.patch('/:id/assign', auth, roleCheck('admin'), assignReport)
+
+// Reassign ticket to another municipal department (admin only)
+router.patch('/:id/reassign-department', auth, roleCheck('admin'), reassignDepartment)
+
+// Forward ticket to external agency (admin only)
+router.post('/:id/forward', auth, roleCheck('admin'), forwardReport)
+
+// Update external ticket status (admin only)
+router.patch('/:id/external-status', auth, roleCheck('admin'), updateExternalStatus)
 
 // Phase 7: Resolve citizen dispute (admin only)
 router.patch('/:id/resolve-dispute', auth, roleCheck('admin'), resolveDispute)

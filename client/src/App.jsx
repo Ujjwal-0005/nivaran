@@ -1,40 +1,71 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { SocketProvider } from './context/SocketContext'
 import NotificationBanner from './components/NotificationBanner'
 import ProtectedRoute from './components/ProtectedRoute'
+import { ErrorBoundary } from './components/ErrorBoundary'
+
+// Eager load public entry routes for instant initial render
 import Landing from './pages/Landing'
-import Register from './pages/Register'
 import Login from './pages/Login'
-import VerifyOTP from './pages/VerifyOTP'
-import CitizenDashboard from './pages/citizen/CitizenDashboard'
-import ReportIssue from './pages/citizen/ReportIssue'
-import MyReports from './pages/citizen/MyReports'
-import ReportDetail from './pages/citizen/ReportDetail'
-import NearbyIssues from './pages/citizen/NearbyIssues'
-import StaffDashboard from './pages/staff/StaffDashboard'
-import StaffTicketDetail from './pages/staff/StaffTicketDetail'
-import AdminDashboard from './pages/admin/AdminDashboard'
-import AdminMap from './pages/admin/AdminMap'
-import AdminTickets from './pages/admin/AdminTickets'
-import AdminTicketDetail from './pages/admin/AdminTicketDetail'
-import AdminStaff from './pages/admin/AdminStaff'
-import AdminDepartments from './pages/admin/AdminDepartments'
-import AdminDisputes from './pages/admin/AdminDisputes'
-import AdminAnalytics from './pages/admin/AdminAnalytics'
-import PublicTransparency from './pages/PublicTransparency'
-import SetPassword from './pages/SetPassword'
-import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard'
-import SuperAdminMunicipalities from './pages/superadmin/SuperAdminMunicipalities'
-import SuperAdminAuditLog from './pages/superadmin/SuperAdminAuditLog'
+import Register from './pages/Register'
+
+// Lazy load feature and role modules
+const NotFound = lazy(() => import('./pages/NotFound'))
+const VerifyOTP = lazy(() => import('./pages/VerifyOTP'))
+const SetPassword = lazy(() => import('./pages/SetPassword'))
+const PublicTransparency = lazy(() => import('./pages/PublicTransparency'))
+
+// Citizen Pages
+const CitizenDashboard = lazy(() => import('./pages/citizen/CitizenDashboard'))
+const ReportIssue = lazy(() => import('./pages/citizen/ReportIssue'))
+const MyReports = lazy(() => import('./pages/citizen/MyReports'))
+const ReportDetail = lazy(() => import('./pages/citizen/ReportDetail'))
+const NearbyIssues = lazy(() => import('./pages/citizen/NearbyIssues'))
+
+// Staff Pages
+const StaffDashboard = lazy(() => import('./pages/staff/StaffDashboard'))
+const StaffTicketDetail = lazy(() => import('./pages/staff/StaffTicketDetail'))
+
+// Admin Pages
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
+const AdminMap = lazy(() => import('./pages/admin/AdminMap'))
+const AdminTickets = lazy(() => import('./pages/admin/AdminTickets'))
+const AdminTicketDetail = lazy(() => import('./pages/admin/AdminTicketDetail'))
+const AdminStaff = lazy(() => import('./pages/admin/AdminStaff'))
+const AdminDepartments = lazy(() => import('./pages/admin/AdminDepartments'))
+const AdminDisputes = lazy(() => import('./pages/admin/AdminDisputes'))
+const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics'))
+
+// SuperAdmin Pages
+const SuperAdminDashboard = lazy(() => import('./pages/superadmin/SuperAdminDashboard'))
+const SuperAdminMunicipalities = lazy(() => import('./pages/superadmin/SuperAdminMunicipalities'))
+const SuperAdminAuditLog = lazy(() => import('./pages/superadmin/SuperAdminAuditLog'))
+const CityDetail = lazy(() => import('./pages/superadmin/CityDetail'))
+const SuperAdminAdmins = lazy(() => import('./pages/superadmin/SuperAdminAdmins'))
+const SuperAdminCityRequests = lazy(() => import('./pages/superadmin/SuperAdminCityRequests'))
+
+function RouteFallback() {
+  return (
+    <div className="min-h-[50vh] flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-4 border-sovereign-indigo border-t-transparent rounded-full animate-spin" />
+        <p className="text-gray-500 text-sm">Loading page…</p>
+      </div>
+    </div>
+  )
+}
 
 function App() {
   return (
-    <AuthProvider>
-      <SocketProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <SocketProvider>
         <BrowserRouter>
           <NotificationBanner />
-          <Routes>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/transparency" element={<PublicTransparency />} />
             <Route path="/register" element={<Register />} />
@@ -182,6 +213,30 @@ function App() {
               } 
             />
             <Route 
+              path="/superadmin/municipalities/:id" 
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <CityDetail />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/superadmin/admins" 
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperAdminAdmins />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/superadmin/city-requests" 
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperAdminCityRequests />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
               path="/superadmin/audit-log" 
               element={
                 <ProtectedRoute allowedRoles={['superadmin']}>
@@ -189,10 +244,14 @@ function App() {
                 </ProtectedRoute>
               } 
             />
+            {/* Catch-all 404 Route */}
+            <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </SocketProvider>
     </AuthProvider>
+    </ErrorBoundary>
   )
 }
 

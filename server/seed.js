@@ -10,6 +10,9 @@ import Category from './models/Category.js'
 import User from './models/User.js'
 import Report from './models/Report.js'
 import connectDB from './config/db.js'
+import { DEPARTMENT_TEMPLATES, seedAgenciesForCity } from './utils/departments.js'
+import { calculatePriorityScore, calculateDaysOpen } from './algorithms/priorityScoring.js'
+import { resolveDepartment } from './services/resolveDepartment.js'
 
 dotenv.config()
 
@@ -36,42 +39,31 @@ class SeededRandom {
   }
 }
 
-// 10 base departments
-const departmentTemplates = [
-  { name: 'Roads', key: 'roads', description: 'Road maintenance and infrastructure' },
-  { name: 'Electrical', key: 'electrical', description: 'Electrical infrastructure and streetlights' },
-  { name: 'Water Supply', key: 'water_supply', description: 'Water supply and pipeline maintenance' },
-  { name: 'Sewerage', key: 'sewerage', description: 'Sewerage and drainage systems' },
-  { name: 'Sanitation', key: 'sanitation', description: 'Waste management and sanitation' },
-  { name: 'Parks', key: 'parks', description: 'Public parks and green spaces' },
-  { name: 'Traffic Police', key: 'traffic_police', description: 'Traffic management and signals' },
-  { name: 'Municipal Enforcement', key: 'municipal_enforcement', description: 'Municipal regulations enforcement' },
-  { name: 'Health', key: 'health', description: 'Public health services' },
-  { name: 'Animal Husbandry', key: 'animal_husbandry', description: 'Animal control and welfare' },
-]
-
 // 19 national shared complaint categories
 const categoriesData = [
-  { name: 'Pothole', departmentKey: 'roads', severityWeight: 7, slaHours: 48 },
-  { name: 'Damaged footpath', departmentKey: 'roads', severityWeight: 4, slaHours: 72 },
-  { name: 'Broken traffic signal', departmentKey: 'traffic_police', severityWeight: 9, slaHours: 12 },
-  { name: 'Missing road signage', departmentKey: 'roads', severityWeight: 5, slaHours: 72 },
-  { name: 'Streetlight not working', departmentKey: 'electrical', severityWeight: 6, slaHours: 24 },
-  { name: 'Exposed electrical wires', departmentKey: 'electrical', severityWeight: 10, slaHours: 6 },
-  { name: 'Water pipeline leak', departmentKey: 'water_supply', severityWeight: 8, slaHours: 24 },
-  { name: 'Low water pressure', departmentKey: 'water_supply', severityWeight: 5, slaHours: 48 },
-  { name: 'Open manhole', departmentKey: 'sewerage', severityWeight: 10, slaHours: 6 },
-  { name: 'Blocked drain', departmentKey: 'sewerage', severityWeight: 6, slaHours: 24 },
-  { name: 'Stagnant water', departmentKey: 'sewerage', severityWeight: 7, slaHours: 48 },
-  { name: 'Garbage overflow', departmentKey: 'sanitation', severityWeight: 6, slaHours: 24 },
-  { name: 'Illegal dumping', departmentKey: 'sanitation', severityWeight: 5, slaHours: 48 },
-  { name: 'Public toilet issue', departmentKey: 'sanitation', severityWeight: 5, slaHours: 24 },
-  { name: 'Fallen tree/branch', departmentKey: 'parks', severityWeight: 7, slaHours: 12 },
-  { name: 'Damaged park equipment', departmentKey: 'parks', severityWeight: 3, slaHours: 96 },
-  { name: 'Encroachment', departmentKey: 'municipal_enforcement', severityWeight: 4, slaHours: 120 },
-  { name: 'Stray animal issue', departmentKey: 'animal_husbandry', severityWeight: 6, slaHours: 48 },
-  { name: 'Noise pollution', departmentKey: 'municipal_enforcement', severityWeight: 3, slaHours: 24 },
+  { name: 'Pothole', departmentKey: 'roads', sector: 'ROADS', severityWeight: 7, slaHours: 48 },
+  { name: 'Damaged footpath', departmentKey: 'roads', sector: 'ROADS', severityWeight: 4, slaHours: 72 },
+  { name: 'Broken traffic signal', departmentKey: 'traffic_police', sector: 'TRAFFIC_ENFORCEMENT', severityWeight: 9, slaHours: 12 },
+  { name: 'Missing road signage', departmentKey: 'roads', sector: 'ROADS', severityWeight: 5, slaHours: 72 },
+  { name: 'Streetlight not working', departmentKey: 'electrical', sector: 'STREET_LIGHTING', severityWeight: 6, slaHours: 24 },
+  { name: 'Exposed electrical wires', departmentKey: 'electrical', sector: 'ELECTRICITY', severityWeight: 10, slaHours: 6 },
+  { name: 'Water pipeline leak', departmentKey: 'water_supply', sector: 'WATER', severityWeight: 8, slaHours: 24 },
+  { name: 'Low water pressure', departmentKey: 'water_supply', sector: 'WATER', severityWeight: 5, slaHours: 48 },
+  { name: 'Open manhole', departmentKey: 'sewerage', sector: 'SEWERAGE', severityWeight: 10, slaHours: 6 },
+  { name: 'Blocked drain', departmentKey: 'sewerage', sector: 'SEWERAGE', severityWeight: 6, slaHours: 24 },
+  { name: 'Stagnant water', departmentKey: 'sewerage', sector: 'SEWERAGE', severityWeight: 7, slaHours: 48 },
+  { name: 'Garbage overflow', departmentKey: 'sanitation', sector: 'SOLID_WASTE', severityWeight: 6, slaHours: 24 },
+  { name: 'Illegal dumping', departmentKey: 'sanitation', sector: 'SOLID_WASTE', severityWeight: 5, slaHours: 48 },
+  { name: 'Public toilet issue', departmentKey: 'sanitation', sector: 'SOLID_WASTE', severityWeight: 5, slaHours: 24 },
+  { name: 'Fallen tree/branch', departmentKey: 'parks', sector: 'PARKS', severityWeight: 7, slaHours: 12 },
+  { name: 'Damaged park equipment', departmentKey: 'parks', sector: 'PARKS', severityWeight: 3, slaHours: 96 },
+  { name: 'Encroachment', departmentKey: 'municipal_enforcement', sector: 'ENFORCEMENT', severityWeight: 4, slaHours: 120 },
+  { name: 'Stray animal issue', departmentKey: 'animal_husbandry', sector: 'ANIMAL', severityWeight: 6, slaHours: 48 },
+  { name: 'Noise pollution', departmentKey: 'municipal_enforcement', sector: 'ENFORCEMENT', severityWeight: 3, slaHours: 24 },
 ]
+
+// The 3 demo cities
+const DEMO_CITIES = ['Jalandhar', 'Phagwara', 'Ludhiana']
 
 export const seedDatabase = async () => {
   try {
@@ -95,13 +87,27 @@ export const seedDatabase = async () => {
       for (const muni of municipalitiesList) {
         // Upsert by { state, name }
         const { _verify, ...muniData } = muni
+        if (muniData.lgdCode === null || muniData.lgdCode === undefined) {
+          delete muniData.lgdCode
+        }
+
+        const isDemoCity = DEMO_CITIES.includes(muniData.name)
+        const initialIsActive = isDemoCity
+
+        // Strip isActive from $set so a re-run never overwrites an admin-deactivated city.
+        // $setOnInsert only runs on first insert, correctly initialising the flag.
+        const { isActive: _ia, ...muniDataWithoutActive } = muniData
+
         const doc = await Municipality.findOneAndUpdate(
           { state: muniData.state, name: muniData.name },
-          { $set: muniData },
+          {
+            $set: muniDataWithoutActive,
+            $setOnInsert: { isActive: initialIsActive },
+          },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         )
         loadedMunicipalities.push(doc)
-        console.log(`  Upserted municipality: ${doc.name}, ${doc.state} (Type: ${doc.type})`)
+        console.log(`  Upserted municipality: ${doc.name}, ${doc.state} (Type: ${doc.type}, Active: ${doc.isActive})`)
       }
     }
     console.log(`Total Municipalities Loaded: ${loadedMunicipalities.length}`)
@@ -114,13 +120,13 @@ export const seedDatabase = async () => {
         { upsert: true, new: true, setDefaultsOnInsert: true }
       )
     }
-    const allCategories = await Category.find()
+    const allCategories = await Category.find().lean()
     console.log(`Categories: ${allCategories.length} active`)
 
-    console.log('\n=== Part 3: Seeding Per-Municipality Departments ===')
+    console.log('\n=== Part 3: Seeding Per-Municipality Departments & Agencies ===')
     const muniDeptMap = new Map() // key: muniId_deptKey -> deptDoc
     for (const muni of loadedMunicipalities) {
-      for (const tpl of departmentTemplates) {
+      for (const tpl of DEPARTMENT_TEMPLATES) {
         const deptDoc = await Department.findOneAndUpdate(
           { municipality: muni._id, key: tpl.key },
           {
@@ -129,6 +135,11 @@ export const seedDatabase = async () => {
               key: tpl.key,
               municipality: muni._id,
               description: tpl.description,
+              sector: tpl.sector,
+              agencyType: tpl.agencyType || 'municipal',
+              isPrimary: Boolean(tpl.isPrimary),
+              isExternal: false,
+              verified: false,
             },
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -136,22 +147,29 @@ export const seedDatabase = async () => {
         muniDeptMap.set(`${muni._id.toString()}_${tpl.key}`, deptDoc)
       }
       console.log(`  Seeded 10 departments for ${muni.name}`)
+
+      // Seed state agencies for the municipality
+      const stateKey = muni.state ? muni.state.toLowerCase() : 'punjab'
+      const agencies = await seedAgenciesForCity(muni._id, stateKey)
+      console.log(`  Seeded ${agencies.length} state agencies for ${muni.name}`)
     }
 
-    console.log('\n=== Part 7: Seeding Demo Accounts & Reports for Jalandhar & Phagwara ===')
+    console.log('\n=== Part 6: Seeding Rich Demo Data for Jalandhar, Phagwara, Ludhiana ===')
     const demoPassword = process.env.DEMO_PASSWORD || process.env.SEED_DEMO_PASSWORD || 'Demo@123'
     const passwordHash = await bcrypt.hash(demoPassword, 10)
 
-    const targetMunis = loadedMunicipalities.filter((m) =>
-      ['Jalandhar', 'Phagwara'].includes(m.name)
-    )
-
+    const targetMunis = loadedMunicipalities.filter((m) => DEMO_CITIES.includes(m.name))
     let totalDemoReports = 0
 
-    for (const muni of targetMunis) {
-      const muniSlug = muni.name.toLowerCase()
+    // To ensure all 19 categories are represented across the 3 cities, we will track category assignments
+    // 19 categories across 3 cities: each city will get 20 reports
+    const demoCityLogins = []
 
-      // 1 Admin per municipality
+    for (let cIdx = 0; cIdx < targetMunis.length; cIdx++) {
+      const muni = targetMunis[cIdx]
+      const muniSlug = muni.name.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+      // 1 Admin per demo city
       const adminEmail = `admin.${muniSlug}@nivaran.gov`
       const adminUser = await User.findOneAndUpdate(
         { email: adminEmail },
@@ -165,15 +183,19 @@ export const seedDatabase = async () => {
             city: muni.name,
             state: muni.state,
             isVerified: true,
+            isActive: true,
+            isPrimaryAdmin: true,
+            isDemo: true,
             tokenVersion: 0,
           },
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       )
 
-      // 2 Staff in different departments (Roads and Water Supply)
+      // 3 Staff across different departments (Roads, Water, Sanitation)
       const roadsDept = muniDeptMap.get(`${muni._id.toString()}_roads`)
       const waterDept = muniDeptMap.get(`${muni._id.toString()}_water_supply`)
+      const sanitationDept = muniDeptMap.get(`${muni._id.toString()}_sanitation`)
 
       const staff1Email = `staff.roads.${muniSlug}@nivaran.gov`
       const staff1 = await User.findOneAndUpdate(
@@ -189,7 +211,12 @@ export const seedDatabase = async () => {
             city: muni.name,
             state: muni.state,
             isVerified: true,
+            isActive: true,
+            isDemo: true,
             tokenVersion: 0,
+            applicationStatus: 'approved',
+            employeeId: `EMP-${muniSlug.substring(0, 3).toUpperCase()}-R001`,
+            designation: 'Road Maintenance Officer',
           },
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -209,13 +236,43 @@ export const seedDatabase = async () => {
             city: muni.name,
             state: muni.state,
             isVerified: true,
+            isActive: true,
+            isDemo: true,
             tokenVersion: 0,
+            applicationStatus: 'approved',
+            employeeId: `EMP-${muniSlug.substring(0, 3).toUpperCase()}-W001`,
+            designation: 'Water Operations Supervisor',
           },
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       )
 
-      // 2 Citizens
+      const staff3Email = `staff.sanitation.${muniSlug}@nivaran.gov`
+      const staff3 = await User.findOneAndUpdate(
+        { email: staff3Email },
+        {
+          $set: {
+            name: `${muni.name} Sanitation Staff`,
+            email: staff3Email,
+            passwordHash,
+            role: 'staff',
+            municipality: muni._id,
+            department: sanitationDept?._id,
+            city: muni.name,
+            state: muni.state,
+            isVerified: true,
+            isActive: true,
+            isDemo: true,
+            tokenVersion: 0,
+            applicationStatus: 'approved',
+            employeeId: `EMP-${muniSlug.substring(0, 3).toUpperCase()}-S001`,
+            designation: 'Sanitation Inspector',
+          },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      )
+
+      // 3 Citizens per demo city
       const citizen1Email = `citizen1.${muniSlug}@example.com`
       const citizen1 = await User.findOneAndUpdate(
         { email: citizen1Email },
@@ -234,6 +291,8 @@ export const seedDatabase = async () => {
               lng: muni.centroid.lng,
             },
             isVerified: true,
+            isActive: true,
+            isDemo: true,
             tokenVersion: 0,
           },
         },
@@ -258,84 +317,239 @@ export const seedDatabase = async () => {
               lng: muni.centroid.lng + 0.005,
             },
             isVerified: true,
+            isActive: true,
+            isDemo: true,
             tokenVersion: 0,
           },
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       )
 
-      console.log(`  Seeded 1 admin, 2 staff, 2 citizens for ${muni.name}`)
+      const citizen3Email = `citizen3.${muniSlug}@example.com`
+      const citizen3 = await User.findOneAndUpdate(
+        { email: citizen3Email },
+        {
+          $set: {
+            name: `${muni.name} Citizen 3`,
+            email: citizen3Email,
+            passwordHash,
+            role: 'citizen',
+            municipality: muni._id,
+            city: muni.name,
+            state: muni.state,
+            homeAddress: {
+              text: `Civil Lines, ${muni.name}`,
+              lat: muni.centroid.lat - 0.004,
+              lng: muni.centroid.lng + 0.003,
+            },
+            isVerified: true,
+            isActive: true,
+            isDemo: true,
+            tokenVersion: 0,
+          },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      )
 
-      // Seed ~8 reports per municipality at centroid + random offset within ~2km
-      // Using deterministic seed per city
-      const citySeed = muni.name === 'Jalandhar' ? 101 : 202
-      const rng = new SeededRandom(citySeed)
-      const statuses = ['reported', 'acknowledged', 'in_progress', 'resolved', 'disputed']
-      const citizens = [citizen1, citizen2]
-      const staffList = [staff1, staff2]
+      demoCityLogins.push({
+        city: muni.name,
+        admin: adminEmail,
+        staff: [staff1Email, staff2Email, staff3Email],
+        citizens: [citizen1Email, citizen2Email, citizen3Email],
+      })
 
-      for (let i = 1; i <= 8; i++) {
-        const ticketId = `CIV-${muni.name.substring(0, 3).toUpperCase()}-${String(i).padStart(4, '0')}`
-        const cat = rng.choice(allCategories)
-        const citizen = rng.choice(citizens)
-        const status = statuses[(i - 1) % statuses.length]
+      console.log(`  Seeded 1 admin, 3 staff, 3 citizens for ${muni.name}`)
 
-        // ~2km radius: 1 deg lat ~ 111 km, 2km ~ 0.018 deg
-        const latOffset = (rng.next() - 0.5) * 0.018
-        const lngOffset = (rng.next() - 0.5) * 0.018
+      // Fetch external agencies for this municipality for forwarding demo
+      const externalAgencies = await Department.find({
+        municipality: muni._id,
+        isExternal: true,
+        isActive: true,
+      }).lean()
 
-        const dept = muniDeptMap.get(`${muni._id.toString()}_${cat.departmentKey}`)
+      const pspclAgency = externalAgencies.find((a) => a.agencyCode === 'PSPCL') || externalAgencies[0]
+      const pwdAgency = externalAgencies.find((a) => a.agencyCode === 'PUNJAB-PWD-BR') || externalAgencies[1] || externalAgencies[0]
+
+      // 20 reports per demo city (deterministic)
+      // Dates spread over the last 60 days (e.g. daysAgo = 2 + (i * 2.8))
+      const rng = new SeededRandom(300 + cIdx * 100)
+      const citizens = [citizen1, citizen2, citizen3]
+      const staffList = [staff1, staff2, staff3]
+
+      // Map dept to staff for assignment
+      const deptStaffMap = {
+        roads: staff1,
+        water_supply: staff2,
+        sanitation: staff3,
+      }
+
+      // 20 reports per city
+      for (let i = 1; i <= 20; i++) {
+        const ticketId = `CIV-${muniSlug.substring(0, 3).toUpperCase()}-${String(i).padStart(4, '0')}`
+
+        // Deterministic category indexing to ensure all 19 categories appear across demo cities
+        // With 19 categories and 3 cities (60 reports total): category index = (cIdx * 7 + i - 1) % 19
+        const catIndex = (cIdx * 7 + i - 1) % allCategories.length
+        const cat = allCategories[catIndex]
+        const citizen = citizens[(i - 1) % citizens.length]
+
+        // Status spread: reported, acknowledged, in_progress, resolved, disputed
+        const allStatuses = ['reported', 'acknowledged', 'in_progress', 'resolved', 'disputed']
+        let status = allStatuses[(i - 1) % allStatuses.length]
+
+        // Days ago spread from 1 to 58 days
+        const daysAgo = Math.floor(1 + ((i - 1) / 19) * 56)
+        const createdAt = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000)
+
+        // Lat/lng offset within ~2km of centroid
+        const latOffset = (rng.next() - 0.5) * 0.02
+        const lngOffset = (rng.next() - 0.5) * 0.02
+
+        // Resolve department with existing resolveDepartment service
+        const resolution = await resolveDepartment({
+          municipalityId: muni._id,
+          categoryId: cat._id,
+        })
+
+        let resolvedDept = resolution.department
+        let isUnresolved = Boolean(resolution.unresolved)
+        let routedBy = resolution.routedBy || 'sector_primary'
+
+        // Requirement: At least one ticket per demo city with no matching department (unresolved)
+        // Let report #19 be explicitly unresolved
+        if (i === 19) {
+          resolvedDept = null
+          isUnresolved = true
+          routedBy = 'none'
+          status = 'reported'
+        }
+
+        // Upvotes and joined duplicates on some tickets
+        const upvoteUsers = i % 4 === 0
+          ? [citizens[0]._id, citizens[1]._id]
+          : (i % 2 === 0 ? [citizens[0]._id] : [])
+        const upvoteCount = upvoteUsers.length
+        const reportCount = i % 5 === 0 ? 2 : 1
+        const reportedBy = reportCount > 1 ? [citizen._id, citizens[(i) % citizens.length]._id] : [citizen._id]
+
+        // SLA deadline calculation
+        const slaDeadline = new Date(createdAt.getTime() + (cat.slaHours || 48) * 60 * 60 * 1000)
+        const daysOpen = calculateDaysOpen(createdAt)
+        const priorityScore = calculatePriorityScore({
+          reportCount,
+          severityWeight: cat.severityWeight || 5,
+          daysOpen,
+          upvotes: upvoteCount,
+        })
+
+        const isSlaBreached = Date.now() > slaDeadline.getTime() && !['resolved'].includes(status)
 
         const reportData = {
           ticketId,
           municipality: muni._id,
           citizen: citizen._id,
           category: cat._id,
-          department: dept ? dept._id : null,
-          departmentUnresolved: !dept,
-          description: `${cat.name} problem near landmark #${i} in ${muni.name}`,
+          department: resolvedDept ? resolvedDept._id : null,
+          departmentUnresolved: isUnresolved,
+          routedBy,
+          description: `${cat.name} issue observed near landmark #${i} in ${muni.name}`,
           photoUrl: 'https://res.cloudinary.com/demo/image/upload/v1234567890/sample.jpg',
           location: {
             lat: Number((muni.centroid.lat + latOffset).toFixed(6)),
             lng: Number((muni.centroid.lng + lngOffset).toFixed(6)),
           },
           status,
-          isAnonymous: i % 3 === 0,
-          reportCount: 1,
-          reportedBy: [citizen._id],
-          priorityScore: 0,
-          slaDeadline: new Date(Date.now() + cat.slaHours * 60 * 60 * 1000),
+          isAnonymous: i % 4 === 0,
+          reportCount,
+          reportedBy,
+          upvotes: upvoteUsers,
+          priorityScore,
+          slaDeadline,
+          isSlaBreached,
+          createdAt,
+          updatedAt: createdAt,
+          routingHistory: [
+            {
+              at: createdAt,
+              action: 'auto',
+              toDepartment: resolvedDept ? resolvedDept._id : null,
+              reason: `Initial automated routing via ${routedBy}`,
+            },
+          ],
         }
 
-        if (status === 'resolved') {
-          reportData.resolutionPhotoUrl = 'https://res.cloudinary.com/demo/image/upload/v1234567890/resolved.jpg'
-          reportData.resolutionNote = `Repaired by ${muni.name} municipal maintenance crew.`
-          reportData.resolvedAt = new Date(Date.now() - 24 * 60 * 60 * 1000)
-          reportData.assignedTo = staff1._id
-        } else if (status === 'disputed') {
-          reportData.isDisputed = true
-          reportData.disputeReason = 'Work incomplete or poor quality after fixing'
-          reportData.assignedTo = staff2._id
-        } else if (['acknowledged', 'in_progress'].includes(status)) {
-          reportData.assignedTo = (cat.departmentKey === 'roads' ? staff1 : staff2)._id
+        // Requirement: At least two tickets forwarded to an external agency (with an agency reference)
+        // Tickets #7 and #14
+        if (i === 7 && pspclAgency) {
+          reportData.department = pspclAgency._id
+          reportData.status = 'acknowledged'
+          reportData.assignedTo = null
+          reportData.forwarding = {
+            forwardedAt: new Date(createdAt.getTime() + 4 * 60 * 60 * 1000),
+            forwardedBy: adminUser._id,
+            agencyReference: `PSPCL-${muniSlug.toUpperCase()}-REF-00${i}`,
+            note: 'Forwarded to Punjab State Power Corporation for high-voltage grid repair.',
+          }
+          reportData.routingHistory.push({
+            at: new Date(createdAt.getTime() + 4 * 60 * 60 * 1000),
+            action: 'forward',
+            toDepartment: pspclAgency._id,
+            byUser: adminUser._id,
+            reason: 'Forwarded to external utility authority',
+          })
+        } else if (i === 14 && pwdAgency) {
+          reportData.department = pwdAgency._id
+          reportData.status = 'in_progress'
+          reportData.assignedTo = null
+          reportData.forwarding = {
+            forwardedAt: new Date(createdAt.getTime() + 6 * 60 * 60 * 1000),
+            forwardedBy: adminUser._id,
+            agencyReference: `PWD-${muniSlug.toUpperCase()}-B-R-${i}`,
+            note: 'Forwarded to Punjab PWD B&R division as arterial highway is outside MC jurisdiction.',
+          }
+          reportData.routingHistory.push({
+            at: new Date(createdAt.getTime() + 6 * 60 * 60 * 1000),
+            action: 'forward',
+            toDepartment: pwdAgency._id,
+            byUser: adminUser._id,
+            reason: 'State highway jurisdiction',
+          })
+        } else {
+          // Normal municipal ticket assignment and resolution notes
+          const assignedStaff = resolvedDept?.isExternal
+            ? null
+            : (deptStaffMap[cat.departmentKey] || staff1)
+
+          if (status === 'resolved') {
+            reportData.assignedTo = assignedStaff?._id || null
+            reportData.resolutionPhotoUrl = 'https://res.cloudinary.com/demo/image/upload/v1234567890/resolved.jpg'
+            reportData.resolutionNote = `Fixed by ${muni.name} civic department inspection team.`
+            reportData.resolvedAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000)
+          } else if (status === 'disputed') {
+            reportData.assignedTo = assignedStaff?._id || null
+            reportData.isDisputed = true
+            reportData.disputeReason = 'Repair work was substandard and issue recurred.'
+          } else if (['acknowledged', 'in_progress'].includes(status)) {
+            reportData.assignedTo = assignedStaff?._id || null
+          }
         }
 
         await Report.findOneAndUpdate(
           { ticketId },
           { $set: reportData },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
+          { upsert: true, new: true, setDefaultsOnInsert: true, timestamps: false }
         )
         totalDemoReports++
       }
 
-      // Add two same-category reports ~40m apart for duplicate detection demo
+      // Add 2 duplicate test reports ~40m apart
       const dupCategory = allCategories.find((c) => c.name === 'Pothole') || allCategories[0]
       const dupDept = muniDeptMap.get(`${muni._id.toString()}_${dupCategory.departmentKey}`)
       const baseLat = muni.centroid.lat + 0.001
       const baseLng = muni.centroid.lng + 0.001
 
       for (let j = 1; j <= 2; j++) {
-        const dupTicketId = `CIV-${muni.name.substring(0, 3).toUpperCase()}-DUP-${j}`
+        const dupTicketId = `CIV-${muniSlug.substring(0, 3).toUpperCase()}-DUP-${j}`
         await Report.findOneAndUpdate(
           { ticketId: dupTicketId },
           {
@@ -357,7 +571,7 @@ export const seedDatabase = async () => {
               reportCount: 1,
               reportedBy: [citizen1._id],
               priorityScore: 0,
-              slaDeadline: new Date(Date.now() + dupCategory.slaHours * 60 * 60 * 1000),
+              slaDeadline: new Date(Date.now() + (dupCategory.slaHours || 48) * 60 * 60 * 1000),
             },
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -375,12 +589,12 @@ export const seedDatabase = async () => {
     console.log(`  Reports: ${await Report.countDocuments()}`)
 
     console.log(`\n=== Demo Logins (Password: ${demoPassword}) ===`)
-    console.log(`Jalandhar Admin: admin.jalandhar@nivaran.gov`)
-    console.log(`Phagwara Admin: admin.phagwara@nivaran.gov`)
-    console.log(`Jalandhar Staff: staff.roads.jalandhar@nivaran.gov, staff.water.jalandhar@nivaran.gov`)
-    console.log(`Phagwara Staff: staff.roads.phagwara@nivaran.gov, staff.water.phagwara@nivaran.gov`)
-    console.log(`Jalandhar Citizens: citizen1.jalandhar@example.com, citizen2.jalandhar@example.com`)
-    console.log(`Phagwara Citizens: citizen1.phagwara@example.com, citizen2.phagwara@example.com`)
+    for (const d of demoCityLogins) {
+      console.log(`\nCity: ${d.city}`)
+      console.log(`  Admin:    ${d.admin}`)
+      console.log(`  Staff:    ${d.staff.join(', ')}`)
+      console.log(`  Citizens: ${d.citizens.join(', ')}`)
+    }
   } catch (error) {
     console.error('Error seeding database:', error)
     throw error

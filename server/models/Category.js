@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { SECTOR_KEYS } from '../constants/sectors.js'
 
 const categorySchema = new mongoose.Schema({
   name: {
@@ -23,6 +24,11 @@ const categorySchema = new mongoose.Schema({
     required: true,
     default: 48,
     min: 1,
+  },
+  sector: {
+    type: String,
+    required: true,
+    enum: SECTOR_KEYS,
   },
 }, {
   timestamps: true,

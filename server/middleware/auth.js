@@ -53,3 +53,16 @@ export const auth = async (req, res, next) => {
     res.status(500).json({ message: 'Server error during authentication' })
   }
 }
+
+/**
+ * Optional authentication middleware: if Authorization header with Bearer token is present,
+ * verifies it and attaches req.user. If no token, continues as guest without error.
+ */
+export const optionalAuth = async (req, res, next) => {
+  const authHeader = req.headers.authorization
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next()
+  }
+  return auth(req, res, next)
+}
+

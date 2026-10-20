@@ -1,0 +1,62 @@
+[
+  {
+    "name": "Punjab State Power Corporation Limited",
+    "key": "agency_pspcl",
+    "agencyCode": "PSPCL",
+    "agencyType": "utility",
+    "sector": "ELECTRICITY",
+    "isPrimary": true,
+    "isExternal": true,
+    "verified": false,
+    "notes": "_verify: City admin must confirm PSPCL division and contact details for this municipality.",
+    "description": "Punjab State Power Corporation Limited - Electricity distribution and power infrastructure"
+  },
+  {
+    "name": "Punjab Public Works Department (B&R)",
+    "key": "agency_punjab_pwd_br",
+    "agencyCode": "PUNJAB-PWD-BR",
+    "agencyType": "state_dept",
+    "sector": "ROADS",
+    "isPrimary": false,
+    "isExternal": true,
+    "verified": false,
+    "notes": "_verify: City admin must confirm PWD (B&R) jurisdictional boundaries and road ownership inside city limits.",
+    "description": "Punjab PWD (Buildings and Roads) - State highways, arterial roads and major bridges"
+  },
+  {
+    "name": "Punjab Water Supply & Sewerage Board - Water Division",
+    "key": "agency_pwssb_water",
+    "agencyCode": "PWSSB-WATER",
+    "agencyType": "state_dept",
+    "sector": "WATER",
+    "isPrimary": false,
+    "isExternal": true,
+    "verified": false,
+    "notes": "_verify: City admin must confirm PWSSB water supply operational handover status for this municipality.",
+    "description": "Punjab Water Supply & Sewerage Board - Bulk water infrastructure and supply schemes"
+  },
+  {
+    "name": "Punjab Water Supply & Sewerage Board - Sewerage Division",
+    "key": "agency_pwssb_sewerage",
+    "agencyCode": "PWSSB-SEWERAGE",
+    "agencyType": "state_dept",
+    "sector": "SEWERAGE",
+    "isPrimary": false,
+    "isExternal": true,
+    "verified": false,
+    "notes": "_verify: City admin must confirm PWSSB sewerage treatment and trunk line maintenance boundaries.",
+    "description": "Punjab Water Supply & Sewerage Board - Trunk sewer lines and sewage treatment plants"
+  },
+  {
+    "name": "Punjab Police Traffic Wing",
+    "key": "agency_punjab_police_traffic",
+    "agencyCode": "PUNJAB-POLICE-TRAFFIC",
+    "agencyType": "police",
+    "sector": "TRAFFIC_ENFORCEMENT",
+    "isPrimary": true,
+    "isExternal": true,
+    "verified": false,
+    "notes": "_verify: City admin must confirm local Traffic Police zone / Commissionerate traffic cell contact details.",
+    "description": "Punjab Police Traffic Wing - Traffic law enforcement, violations, and signal controls"
+  }
+]

@@ -12,8 +12,8 @@ const getTransporter = () => {
       port: 587,
       secure: false,
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user: process.env.EMAIL_USER?.trim(),
+        pass: process.env.EMAIL_PASS?.trim(),
       },
     })
   }
@@ -194,8 +194,17 @@ export const sendCityAdminInviteEmail = async (to, { name, municipalityName, set
     </div>
   `
   try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[SMTP Not Configured] City Admin Invite link for ${to}: ${setPasswordUrl}`)
+      }
+    }
     await sendEmail(to, subject, html)
   } catch (err) {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      // In development/test environments without SMTP, do not crash invite flow
+      return
+    }
     console.error(`Failed to send city admin invite to ${to}:`, err.message)
     throw err
   }
@@ -259,6 +268,114 @@ export const sendEscalationEmail = async (to, { ticketId, category, priorityScor
     await sendEmail(to, subject, html)
   } catch (err) {
     console.error(`Failed to send escalation email to ${to}:`, err.message)
+  }
+}
+
+// Step 3: Staff application approved email
+export const sendStaffApprovedEmail = async (to, { name, municipalityName, departmentName }) => {
+  const subject = `Your staff application for ${municipalityName} has been approved`
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+      <div style="background-color: #15803d; color: #ffffff; padding: 20px; text-align: center;">
+        <h1 style="margin: 0; font-size: 20px;">✓ Application Approved</h1>
+        <p style="margin: 5px 0 0 0; font-size: 13px; color: #dcfce7;">Nivaran Staff Portal</p>
+      </div>
+      <div style="padding: 24px; color: #1f2937;">
+        <p style="font-size: 15px;">Dear ${name},</p>
+        <p style="font-size: 14px; line-height: 1.5;">
+          Your staff application for <strong>${municipalityName}</strong> has been approved by the city administration.
+        </p>
+        <p style="font-size: 14px;">
+          You have been assigned to the <strong>${departmentName}</strong> department.
+        </p>
+        <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; padding: 14px 16px; margin: 18px 0; border-radius: 8px;">
+          <p style="margin: 0; font-size: 13px; font-weight: bold; color: #166534;">Next Steps:</p>
+          <p style="margin: 4px 0 0 0; font-size: 13px; color: #14532d;">You can now log in to the staff portal and start receiving civic issue assignments.</p>
+        </div>
+      </div>
+      <div style="background-color: #f1f5f9; padding: 12px 24px; text-align: center; color: #64748b; font-size: 11px;">
+        Report it. Track it. Nivaran — Resolved.
+      </div>
+    </div>
+  `
+
+  try {
+    await sendEmail(to, subject, html)
+  } catch (err) {
+    console.error(`Failed to send staff approval email to ${to}:`, err.message)
+  }
+}
+
+// Step 3: Staff application rejected email
+export const sendStaffRejectedEmail = async (to, { name, municipalityName, reason }) => {
+  const subject = `Your staff application for ${municipalityName} has been rejected`
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #fca5a5; border-radius: 12px; overflow: hidden;">
+      <div style="background-color: #b91c1c; color: #ffffff; padding: 20px; text-align: center;">
+        <h1 style="margin: 0; font-size: 20px;">✕ Application Rejected</h1>
+        <p style="margin: 5px 0 0 0; font-size: 13px; color: #fee2e2;">Nivaran Staff Portal</p>
+      </div>
+      <div style="padding: 24px; color: #1f2937;">
+        <p style="font-size: 15px;">Dear ${name},</p>
+        <p style="font-size: 14px; line-height: 1.5;">
+          Your staff application for <strong>${municipalityName}</strong> has been reviewed and rejected by the city administration.
+        </p>
+        <div style="background-color: #fef2f2; border: 1px solid #fecaca; padding: 14px 16px; margin: 18px 0; border-radius: 8px;">
+          <p style="margin: 0; font-size: 13px; font-weight: bold; color: #991b1b;">Reason for rejection:</p>
+          <p style="margin: 4px 0 0 0; font-size: 13px; color: #7f1d1d;">${reason || 'No reason provided.'}</p>
+        </div>
+        <p style="font-size: 13px; color: #6b7280; margin-top: 16px;">
+          If you believe this is an error, please contact the city administration directly.
+        </p>
+      </div>
+      <div style="background-color: #f1f5f9; padding: 12px 24px; text-align: center; color: #64748b; font-size: 11px;">
+        Report it. Track it. Nivaran — Resolved.
+      </div>
+    </div>
+  `
+
+  try {
+    await sendEmail(to, subject, html)
+  } catch (err) {
+    console.error(`Failed to send staff rejection email to ${to}:`, err.message)
+  }
+}
+
+// Step 3: Staff account revoked email
+export const sendStaffRevokedEmail = async (to, { name, municipalityName, reason }) => {
+  const subject = `Your staff account for ${municipalityName} has been revoked`
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #fca5a5; border-radius: 12px; overflow: hidden;">
+      <div style="background-color: #b91c1c; color: #ffffff; padding: 20px; text-align: center;">
+        <h1 style="margin: 0; font-size: 20px;">⚠ Account Revoked</h1>
+        <p style="margin: 5px 0 0 0; font-size: 13px; color: #fee2e2;">Nivaran Staff Portal</p>
+      </div>
+      <div style="padding: 24px; color: #1f2937;">
+        <p style="font-size: 15px;">Dear ${name},</p>
+        <p style="font-size: 14px; line-height: 1.5;">
+          Your staff account for <strong>${municipalityName}</strong> has been revoked by the city administration.
+        </p>
+        <p style="font-size: 14px;">
+          You have been logged out immediately and will no longer have access to the staff portal.
+        </p>
+        <div style="background-color: #fef2f2; border: 1px solid #fecaca; padding: 14px 16px; margin: 18px 0; border-radius: 8px;">
+          <p style="margin: 0; font-size: 13px; font-weight: bold; color: #991b1b;">Reason for revocation:</p>
+          <p style="margin: 4px 0 0 0; font-size: 13px; color: #7f1d1d;">${reason || 'No reason provided.'}</p>
+        </div>
+        <p style="font-size: 13px; color: #6b7280; margin-top: 16px;">
+          Any open tickets assigned to you have been returned to the unassigned pool.
+        </p>
+      </div>
+      <div style="background-color: #f1f5f9; padding: 12px 24px; text-align: center; color: #64748b; font-size: 11px;">
+        Report it. Track it. Nivaran — Resolved.
+      </div>
+    </div>
+  `
+
+  try {
+    await sendEmail(to, subject, html)
+  } catch (err) {
+    console.error(`Failed to send staff revocation email to ${to}:`, err.message)
   }
 }
 

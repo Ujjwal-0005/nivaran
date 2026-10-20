@@ -4,27 +4,116 @@
     "nameLocal": "ਜਲੰਧਰ",
     "state": "Punjab",
     "type": "corporation",
-    "lgdCode": null,
     "_verify": true,
     "centroid": {
       "lat": 31.3260,
       "lng": 75.5762
     },
-    "defaultZoom": 13,
-    "subdivisions": []
+    "centroidApproximate": true,
+    "defaultZoom": 13
   },
   {
     "name": "Phagwara",
     "nameLocal": "ਫਗਵਾੜਾ",
     "state": "Punjab",
     "type": "corporation",
-    "lgdCode": null,
     "_verify": true,
     "centroid": {
       "lat": 31.2240,
       "lng": 75.7708
     },
-    "defaultZoom": 13,
-    "subdivisions": []
+    "centroidApproximate": true,
+    "defaultZoom": 13
+  },
+  {
+    "name": "Ludhiana",
+    "nameLocal": "ਲੁਧਿਆਣਾ",
+    "state": "Punjab",
+    "type": "corporation",
+    "_verify": true,
+    "centroid": {
+      "lat": 30.9010,
+      "lng": 75.8573
+    },
+    "centroidApproximate": true,
+    "defaultZoom": 13
+  },
+  {
+    "name": "Amritsar",
+    "nameLocal": "ਅੰਮ੍ਰਿਤਸਰ",
+    "state": "Punjab",
+    "type": "corporation",
+    "_verify": true,
+    "centroid": {
+      "lat": 31.6340,
+      "lng": 74.8723
+    },
+    "centroidApproximate": true,
+    "defaultZoom": 13
+  },
+  {
+    "name": "Patiala",
+    "nameLocal": "ਪਟਿਆਲਾ",
+    "state": "Punjab",
+    "type": "corporation",
+    "_verify": true,
+    "centroid": {
+      "lat": 30.3398,
+      "lng": 76.3869
+    },
+    "centroidApproximate": true,
+    "defaultZoom": 13
+  },
+  {
+    "name": "Bathinda",
+    "nameLocal": "ਬਠਿੰਡਾ",
+    "state": "Punjab",
+    "type": "corporation",
+    "_verify": true,
+    "centroid": {
+      "lat": 30.2110,
+      "lng": 74.9455
+    },
+    "centroidApproximate": true,
+    "defaultZoom": 13
+  },
+  {
+    "name": "SAS Nagar (Mohali)",
+    "nameLocal": "ਐਸ.ਏ.ਐਸ. ਨਗਰ (ਮੋਹਾਲੀ)",
+    "state": "Punjab",
+    "type": "corporation",
+    "_verify": true,
+    "centroid": {
+      "lat": 30.7046,
+      "lng": 76.7179
+    },
+    "centroidApproximate": true,
+    "defaultZoom": 13
+  },
+  {
+    "name": "Pathankot",
+    "nameLocal": "ਪਠਾਨਕੋਟ",
+    "state": "Punjab",
+    "type": "corporation",
+    "_verify": true,
+    "centroid": {
+      "lat": 32.2686,
+      "lng": 75.6499
+    },
+    "centroidApproximate": true,
+    "defaultZoom": 13
+  },
+  {
+    "name": "Hoshiarpur",
+    "nameLocal": "ਹੁਸ਼ਿਆਰਪੁਰ",
+    "state": "Punjab",
+    "type": "corporation",
+    "_verify": true,
+    "centroid": {
+      "lat": 31.5300,
+      "lng": 75.9200
+    },
+    "centroidApproximate": true,
+    "defaultZoom": 13
   }
 ]

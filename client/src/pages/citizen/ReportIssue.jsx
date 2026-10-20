@@ -50,23 +50,57 @@ function ReportIssue() {
     : [20.5937, 78.9629]
   const fallbackZoom = user?.municipality?.defaultZoom || 13
 
+  const [pinCity, setPinCity] = useState(null)
+  const [detectingCity, setDetectingCity] = useState(false)
+
   useEffect(() => {
-    fetchCategories()
     getUserLocation()
   }, [])
 
-  const fetchCategories = async () => {
-    try {
-      setLoading(true)
-      const response = await api.get('/api/categories')
-      setCategories(response.data.categories)
-    } catch { setError('Failed to load categories.') }
-    finally { setLoading(false) }
-  }
-
   useEffect(() => {
-    if (position) setFormData(prev => ({ ...prev, lat: position[0], lng: position[1] }))
+    if (position) {
+      setFormData(prev => ({ ...prev, lat: position[0], lng: position[1] }))
+      fetchCityAndCategories(position[0], position[1])
+    } else {
+      fetchCityAndCategories()
+    }
   }, [position])
+
+  const fetchCityAndCategories = async (lat, lng) => {
+    try {
+      const params = (lat !== undefined && lng !== undefined) ? { lat, lng } : {}
+      const catRes = await api.get('/api/categories', { params })
+      setCategories(catRes.data.categories)
+
+      if (lat !== undefined && lng !== undefined) {
+        setDetectingCity(true)
+        try {
+          const res = await api.get('/api/municipalities/resolve', { params: { lat, lng } })
+          setPinCity(res.data.municipality)
+        } catch (resErr) {
+          if (resErr.response?.status === 403) {
+            setPinCity({
+              name: resErr.response.data.name,
+              state: resErr.response.data.state,
+              isLive: false,
+              message: resErr.response.data.message,
+            })
+          } else if (resErr.response?.status === 400) {
+            setPinCity({
+              outOfRange: true,
+              message: resErr.response.data.message || 'Location is outside supported municipal boundaries',
+            })
+          } else {
+            setPinCity(null)
+          }
+        }
+      }
+    } catch {
+      // Non-blocking fallback
+    } finally {
+      setDetectingCity(false)
+    }
+  }
 
   const getUserLocation = () => {
     if (navigator.geolocation) {
@@ -128,7 +162,10 @@ function ReportIssue() {
     if (!possibleDuplicate) return
     try {
       setSubmitting(true)
-      await api.post(`/api/reports/${possibleDuplicate.id}/join`)
+      await api.post(`/api/reports/${possibleDuplicate.id}/join`, {
+        lat: formData.lat,
+        lng: formData.lng,
+      })
       setSuccess(`You have joined ticket ${possibleDuplicate.ticketId}. Report count updated.`)
       setShowDuplicateConfirm(false)
       setTimeout(() => navigate('/citizen/reports'), 2000)
@@ -294,9 +331,32 @@ function ReportIssue() {
               </MapContainer>
             </div>
             {position ? (
-              <p className="text-xs text-jan-kalyan-green font-semibold mt-2">
-                ✓ Location set: {position[0].toFixed(5)}, {position[1].toFixed(5)}
-              </p>
+              <div className="mt-2 space-y-1">
+                <p className="text-xs text-jan-kalyan-green font-semibold">
+                  ✓ Location set: {position[0].toFixed(5)}, {position[1].toFixed(5)}
+                </p>
+                {pinCity && pinCity.outOfRange ? (
+                  <div className="text-xs px-2.5 py-1.5 rounded flex items-center justify-between bg-red-50 text-red-800 border border-red-200">
+                    <span>⚠️ {pinCity.message}</span>
+                    <span className="font-semibold text-[11px] uppercase tracking-wider">Out of Range</span>
+                  </div>
+                ) : pinCity && pinCity.isLive === false ? (
+                  <div className="text-xs px-2.5 py-1.5 rounded flex items-center justify-between bg-amber-50 text-amber-800 border border-amber-200">
+                    <span>⚠️ <strong>{pinCity.name}, {pinCity.state}</strong> is not live on Nivaran yet.</span>
+                    <span className="font-semibold text-[11px] uppercase tracking-wider">Not Live</span>
+                  </div>
+                ) : pinCity ? (
+                  <div className="text-xs px-2.5 py-1.5 rounded flex items-center justify-between bg-emerald-50 text-emerald-800 border border-emerald-200">
+                    <span>
+                      📍 Assigned to: <strong>{pinCity.name}, {pinCity.state}</strong>
+                      {pinCity.name !== user?.municipality?.name && ' (travelling)'}
+                    </span>
+                    <span className="font-semibold text-[11px] uppercase tracking-wider">
+                      Live City ✓
+                    </span>
+                  </div>
+                ) : null}
+              </div>
             ) : (
               <p className="text-xs text-amber-600 mt-2">⚠ No location selected yet</p>
             )}

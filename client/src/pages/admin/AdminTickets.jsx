@@ -3,12 +3,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../../utils/api'
 import AdminNavbar from '../../components/AdminNavbar'
 import StatusBadge from '../../components/StatusBadge'
+import PaginationControls from '../../components/PaginationControls'
 
 function AdminTickets() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [reports, setReports] = useState([])
+  const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 0 })
   const [departments, setDepartments] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
@@ -18,6 +20,8 @@ function AdminTickets() {
   const deptFilter = searchParams.get('department') || ''
   const catFilter = searchParams.get('category') || ''
   const escalatedFilter = searchParams.get('escalated') === 'true'
+  const unresolvedFilter = searchParams.get('unresolved') === 'true'
+  const currentPage = parseInt(searchParams.get('page'), 10) || 1
 
   // Search query
   const [searchQuery, setSearchQuery] = useState('')
@@ -37,7 +41,7 @@ function AdminTickets() {
       ])
       setDepartments(deptRes.data.departments || [])
       setCategories(catRes.data.categories || [])
-      await fetchReports()
+      await fetchReports(currentPage)
     } catch (err) {
       console.error('Error fetching tickets table data:', err)
     } finally {
@@ -45,16 +49,20 @@ function AdminTickets() {
     }
   }
 
-  const fetchReports = async () => {
+  const fetchReports = async (page = 1) => {
     try {
-      const params = {}
+      const params = { page, limit: 20 }
       if (statusFilter && statusFilter !== 'open') params.status = statusFilter
       if (deptFilter) params.department = deptFilter
       if (catFilter) params.category = catFilter
       if (escalatedFilter) params.escalated = 'true'
+      if (unresolvedFilter) params.unresolved = 'true'
 
       const res = await api.get('/api/reports', { params })
       setReports(res.data.reports || [])
+      if (res.data.pagination) {
+        setPagination(res.data.pagination)
+      }
     } catch (err) {
       console.error('Error fetching reports:', err)
     }
@@ -63,7 +71,7 @@ function AdminTickets() {
   // Refetch when filters change
   useEffect(() => {
     fetchReports()
-  }, [statusFilter, deptFilter, catFilter, escalatedFilter])
+  }, [statusFilter, deptFilter, catFilter, escalatedFilter, unresolvedFilter])
 
   const handleFilterChange = (key, val) => {
     const nextParams = new URLSearchParams(searchParams)
@@ -227,6 +235,20 @@ function AdminTickets() {
                 Escalated Only 🚨
               </label>
             </div>
+
+            {/* Needs Department Toggle */}
+            <div className="flex items-center gap-2 px-3 py-2 border border-amber-300 rounded bg-amber-50">
+              <input
+                type="checkbox"
+                id="unresolvedTable"
+                checked={unresolvedFilter}
+                onChange={(e) => handleFilterChange('unresolved', e.target.checked ? 'true' : '')}
+                className="rounded text-amber-600 focus:ring-amber-500 h-4 w-4"
+              />
+              <label htmlFor="unresolvedTable" className="text-xs font-semibold text-amber-900 cursor-pointer">
+                Needs department ⚠️
+              </label>
+            </div>
           </div>
         </div>
 
@@ -238,6 +260,7 @@ function AdminTickets() {
                 <tr className="bg-parchment border-b border-earthen-slate text-gray-500 font-bold uppercase tracking-wider text-[11px]">
                   <th className="py-3.5 px-4">Ticket ID</th>
                   <th className="py-3.5 px-4">Category & Dept</th>
+                  <th className="py-3.5 px-4">Handled by</th>
                   <th className="py-3.5 px-4">Status</th>
                   <th
                     className="py-3.5 px-4 cursor-pointer hover:text-gray-900"
@@ -273,19 +296,21 @@ function AdminTickets() {
               <tbody className="divide-y divide-earthen-slate">
                 {loading ? (
                   <tr>
-                    <td colSpan="8" className="py-12 text-center text-gray-400">
+                    <td colSpan="9" className="py-12 text-center text-gray-400">
                       Loading tickets registry...
                     </td>
                   </tr>
                 ) : filteredAndSortedReports.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="py-12 text-center text-gray-400">
+                    <td colSpan="9" className="py-12 text-center text-gray-400">
                       No tickets matching your filter criteria.
                     </td>
                   </tr>
                 ) : (
                   filteredAndSortedReports.map((r) => {
                     const sla = getSlaStatus(r)
+                    const handled = r.handledBy || r.department
+                    const isExternal = Boolean(handled?.isExternal || r.handledByExternal)
                     return (
                       <tr
                         key={r._id}
@@ -300,6 +325,26 @@ function AdminTickets() {
                             {r.category?.name || 'General'}
                           </p>
                           <p className="text-[11px] text-gray-500">{r.department?.name || 'Unassigned'}</p>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          {r.departmentUnresolved ? (
+                            <span className="inline-block px-2 py-0.5 text-xs font-semibold rounded bg-amber-100 text-amber-800 border border-amber-300">
+                              ⚠️ Needs department
+                            </span>
+                          ) : handled ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium text-gray-800 text-xs">
+                                {handled.name}
+                              </span>
+                              {isExternal && (
+                                <span className="inline-block px-1.5 py-0.5 text-[10px] font-bold rounded bg-purple-100 text-purple-800 border border-purple-300">
+                                  External
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 text-xs">—</span>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <StatusBadge status={r.status} size="sm" />
@@ -343,6 +388,20 @@ function AdminTickets() {
               </tbody>
             </table>
           </div>
+          <PaginationControls
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            total={pagination.total}
+            limit={pagination.limit}
+            onPageChange={(newPage) => {
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev)
+                next.set('page', newPage)
+                return next
+              })
+              fetchReports(newPage)
+            }}
+          />
         </div>
       </main>
     </div>

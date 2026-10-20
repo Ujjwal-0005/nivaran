@@ -51,6 +51,60 @@ const reportSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  routedBy: {
+    type: String,
+    enum: ['category_override', 'sector_primary', 'sector_fallback', 'none', null],
+    default: null,
+  },
+  routingHistory: [{
+    at: {
+      type: Date,
+      default: Date.now,
+    },
+    action: {
+      type: String,
+      enum: ['auto', 'reassign', 'forward'],
+      required: true,
+    },
+    fromDepartment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Department',
+      default: null,
+    },
+    toDepartment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Department',
+      default: null,
+    },
+    byUser: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    reason: {
+      type: String,
+      default: '',
+    },
+  }],
+  forwarding: {
+    forwardedAt: {
+      type: Date,
+      default: null,
+    },
+    forwardedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    agencyReference: {
+      type: String,
+      default: '',
+    },
+    note: {
+      type: String,
+      default: '',
+    },
+  },
   description: {
     type: String,
     required: true,
@@ -69,6 +123,18 @@ const reportSchema = new mongoose.Schema({
     lng: {
       type: Number,
       required: true,
+    },
+  },
+  // GeoJSON Point for 2dsphere duplicate-prefilter queries
+  geoPoint: {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+    },
+    coordinates: {
+      type: [Number], // [lng, lat]  — GeoJSON order
+      default: [0, 0],
     },
   },
   status: {
@@ -139,7 +205,24 @@ const reportSchema = new mongoose.Schema({
   timestamps: true,
 })
 
+// ── Indexes ─────────────────────────────────────────────────────────────────
+
+// Existing
 reportSchema.index({ municipality: 1, status: 1 })
 reportSchema.index({ municipality: 1, createdAt: -1 })
 
+// New compound indexes for frequent query patterns (municipality leads every compound index)
+reportSchema.index({ municipality: 1, department: 1, status: 1 })
+reportSchema.index({ municipality: 1, assignedTo: 1, status: 1 })
+reportSchema.index({ municipality: 1, category: 1, status: 1 })
+reportSchema.index({ municipality: 1, isEscalated: 1, slaDeadline: 1 }) // SLA cron
+reportSchema.index({ municipality: 1, departmentUnresolved: 1, priorityScore: -1 })
+
+// Citizen own-reports (cross-city: no municipality filter)
+reportSchema.index({ citizen: 1, createdAt: -1 })
+
+// 2dsphere index for geo prefilter in duplicate detection
+reportSchema.index({ geoPoint: '2dsphere' })
+
 export default mongoose.model('Report', reportSchema)
+

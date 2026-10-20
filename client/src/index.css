@@ -127,3 +127,22 @@
   .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 }
+
+/* ── Leaflet Stacking Context Fix ────────────────────────── */
+/* Leaflet uses internal z-indexes up to 1000 for controls and panes.
+   Isolate leaflet-container into its own stacking context with z-index: 0
+   so that sticky navbars (z-30/z-40) and modals/overlays (z-50) stay strictly above. */
+.leaflet-container {
+  z-index: 0 !important;
+  position: relative;
+}
+
+.leaflet-pane {
+  z-index: 1 !important;
+}
+
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 2 !important;
+}
+

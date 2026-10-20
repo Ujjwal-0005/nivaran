@@ -209,7 +209,14 @@ function ReportDetail() {
             {/* Title row */}
             <div className="flex flex-wrap justify-between items-start gap-3 mb-5">
               <div>
-                <p className="font-mono text-xs font-bold text-gray-400 mb-0.5">{report.ticketId}</p>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <p className="font-mono text-xs font-bold text-gray-400">{report.ticketId}</p>
+                  {report.municipality?.name && (
+                    <span className="text-[10px] bg-parchment text-earthen-slate-dark font-medium px-2 py-0.5 rounded border border-earthen-slate">
+                      📍 {report.municipality.name}, {report.municipality.state || 'Punjab'}
+                    </span>
+                  )}
+                </div>
                 <h1 className="font-display text-xl font-bold text-sovereign-indigo">
                   {report.category?.name || 'Issue'}
                 </h1>
@@ -217,6 +224,22 @@ function ReportDetail() {
                   <p className="text-xs font-semibold mt-0.5" style={{ color: deptColor.text }}>
                     {report.department?.name || report.category?.department?.name}
                   </p>
+                )}
+                {report.handledBy?.isExternal && (
+                  <div className="mt-2 inline-flex flex-wrap items-center gap-1.5 px-2.5 py-1 rounded bg-blue-50 text-blue-800 border border-blue-200 text-xs font-medium">
+                    <span>
+                      🏢 Forwarded to {report.handledBy.name}
+                      {report.forwardedAt && ` on ${new Date(report.forwardedAt).toLocaleDateString()}`}
+                    </span>
+                    {report.agencyReference && (
+                      <span className="font-semibold text-blue-900">· Reference: {report.agencyReference}</span>
+                    )}
+                  </div>
+                )}
+                {report.departmentUnresolved && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-50 text-amber-800 border border-amber-300 text-xs font-medium">
+                    <span>⏳ Awaiting department assignment</span>
+                  </div>
                 )}
               </div>
               <div className="flex flex-col items-end gap-2">

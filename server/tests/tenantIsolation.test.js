@@ -1,13 +1,34 @@
+/**
+ * tenantIsolation.test.js
+ *
+ * Tests cross-municipality data isolation (reports, staff, departments, analytics,
+ * socket rooms). Runs against the MONGO_URI_TEST database only — never the real one.
+ *
+ * Run with: npm run test:isolation  (from server/)
+ *
+ * Requires MONGO_URI_TEST to be set in server/.env or in the current shell session.
+ * The guard in tests/helpers/testDb.js aborts immediately if:
+ *   - MONGO_URI_TEST is missing or empty
+ *   - MONGO_URI_TEST equals MONGO_URI
+ *   - The database name in MONGO_URI_TEST does not contain "test"
+ */
+
+// ── IMPORTANT: testDb must be imported FIRST so it overrides process.env.MONGO_URI
+// before any other module that touches mongoose is imported.
+import { connectTestDB, disconnectTestDB } from './helpers/testDb.js'
+
 import http from 'http'
 import express from 'express'
 import cors from 'cors'
-import dotenv from 'dotenv'
 import mongoose from 'mongoose'
 import jwt from 'jsonwebtoken'
+import dotenv from 'dotenv'
 import { io as ClientIO } from 'socket.io-client'
 
-import connectDB from '../config/db.js'
-import { initSocket, getIO } from '../config/socket.js'
+// Load .env so JWT_SECRET and other vars are available (MONGO_URI already overridden by testDb)
+dotenv.config()
+
+import { initSocket } from '../config/socket.js'
 import { notifyAdmins } from '../utils/notify.js'
 
 import authRoutes from '../routes/authRoutes.js'
@@ -25,9 +46,11 @@ import Category from '../models/Category.js'
 import User from '../models/User.js'
 import Report from '../models/Report.js'
 
-dotenv.config()
+// Unique prefix for any fixtures this suite creates (avoids collision across runs)
+const TEST_RUN_ID  = `iso_${Date.now()}`
+const SA_TEST_EMAIL = `superadmin.${TEST_RUN_ID}@nivaran.gov`
 
-// Create test express app
+// ── Build test express app ────────────────────────────────────────────────────
 const app = express()
 app.use(cors())
 app.use(express.json())
@@ -49,7 +72,7 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app)
 const ioServer = initSocket(server)
 
-// Simple fetch wrapper
+// ── Fetch helper ──────────────────────────────────────────────────────────────
 const request = async (port, method, path, token, body = null) => {
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
@@ -93,10 +116,35 @@ function assert(condition, message) {
   }
 }
 
+// ── Cleanup helper — removes only fixtures created by THIS run ────────────────
+async function cleanup() {
+  try {
+    await User.deleteMany({ email: SA_TEST_EMAIL })
+    // Remove any other fixtures with this run's prefix (future-proofing)
+    await User.deleteMany({ email: new RegExp(TEST_RUN_ID) })
+  } catch (err) {
+    console.warn('[cleanup] Warning during cleanup:', err.message)
+  }
+}
+
+// ── "Clean slate" — remove leftover fixtures from previous crashed runs ───────
+async function cleanSlate() {
+  // tenantIsolation only adds a superadmin. Remove any with the "iso_" prefix
+  // that may have been left over from a crash. Match by prefix only.
+  const deleted = await User.deleteMany({ email: /^superadmin\.iso_\d+@nivaran\.gov$/ })
+  if (deleted.deletedCount > 0) {
+    console.log(`[clean-slate] Removed ${deleted.deletedCount} leftover isolation-test fixture(s)`)
+  }
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 async function runTests() {
   console.log('=== Starting Tenant Isolation Test Suite ===\n')
 
-  await connectDB()
+  // Connect to the TEST database (guard aborts if MONGO_URI_TEST is invalid)
+  await connectTestDB()
+
+  await cleanSlate()
 
   const port = 5055
   await new Promise((resolve) => server.listen(port, resolve))
@@ -105,39 +153,48 @@ async function runTests() {
   try {
     // 1. Fetch the two seeded municipalities: Jalandhar & Phagwara
     const jalandhar = await Municipality.findOne({ name: 'Jalandhar' })
-    const phagwara = await Municipality.findOne({ name: 'Phagwara' })
+    const phagwara  = await Municipality.findOne({ name: 'Phagwara' })
     assert(jalandhar && phagwara, 'Found seeded Jalandhar and Phagwara municipalities')
 
+    if (!jalandhar || !phagwara) {
+      console.error('\n  The test database does not have the required seed data.')
+      console.error('  Run: MONGO_URI=<test-db-uri> node seed.js  to seed the test database.\n')
+      process.exit(1)
+    }
+
     // 2. Fetch users for each municipality
-    const jAdmin = await User.findOne({ email: 'admin.jalandhar@nivaran.gov' })
-    const pAdmin = await User.findOne({ email: 'admin.phagwara@nivaran.gov' })
-    const jStaff = await User.findOne({ email: 'staff.roads.jalandhar@nivaran.gov' })
-    const pStaff = await User.findOne({ email: 'staff.roads.phagwara@nivaran.gov' })
+    const jAdmin   = await User.findOne({ email: 'admin.jalandhar@nivaran.gov' })
+    const pAdmin   = await User.findOne({ email: 'admin.phagwara@nivaran.gov' })
+    const jStaff   = await User.findOne({ email: 'staff.roads.jalandhar@nivaran.gov' })
+    const pStaff   = await User.findOne({ email: 'staff.roads.phagwara@nivaran.gov' })
     const jCitizen = await User.findOne({ email: 'citizen1.jalandhar@example.com' })
     const pCitizen = await User.findOne({ email: 'citizen1.phagwara@example.com' })
 
-    assert(jAdmin && pAdmin, 'Found admin users for both cities')
-    assert(jStaff && pStaff, 'Found staff users for both cities')
+    assert(jAdmin && pAdmin,     'Found admin users for both cities')
+    assert(jStaff && pStaff,     'Found staff users for both cities')
     assert(jCitizen && pCitizen, 'Found citizen users for both cities')
 
-    // 3. Create Superadmin user without municipality
-    let superAdmin = await User.findOne({ email: 'superadmin.test@nivaran.gov' })
-    if (!superAdmin) {
-      superAdmin = await User.create({
-        name: 'Super Admin',
-        email: 'superadmin.test@nivaran.gov',
-        passwordHash: 'dummyhash',
-        role: 'superadmin',
-        isVerified: true,
-      })
-    }
+    // 3. Create a Superadmin user for this run (unique email = no collision)
+    const superAdmin = await User.findOneAndUpdate(
+      { email: SA_TEST_EMAIL },
+      {
+        $setOnInsert: {
+          name: 'Super Admin (isolation test)',
+          email: SA_TEST_EMAIL,
+          passwordHash: 'dummyhash',
+          role: 'superadmin',
+          isVerified: true,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    )
 
-    const jAdminToken = signToken(jAdmin)
-    const pAdminToken = signToken(pAdmin)
-    const jStaffToken = signToken(jStaff)
-    const pStaffToken = signToken(pStaff)
-    const jCitizenToken = signToken(jCitizen)
-    const pCitizenToken = signToken(pCitizen)
+    const jAdminToken     = signToken(jAdmin)
+    const pAdminToken     = signToken(pAdmin)
+    const jStaffToken     = signToken(jStaff)
+    const pStaffToken     = signToken(pStaff)
+    const jCitizenToken   = signToken(jCitizen)
+    const pCitizenToken   = signToken(pCitizen)
     const superAdminToken = signToken(superAdmin)
 
     // 4. Fetch reports from each municipality
@@ -146,53 +203,45 @@ async function runTests() {
     assert(jReport && pReport, 'Found sample report for both cities')
 
     console.log('\n--- 1. Cross-City Report Isolation (:id endpoints) ---')
-    // Jalandhar citizen / admin attempting to read Phagwara report detail
     const resGetPByJCitizen = await request(port, 'GET', `/api/reports/${pReport._id}`, jCitizenToken)
     assert(resGetPByJCitizen.status === 404, 'Jalandhar citizen reading Phagwara report returns 404')
 
     const resGetPByJAdmin = await request(port, 'GET', `/api/reports/${pReport._id}`, jAdminToken)
     assert(resGetPByJAdmin.status === 404, 'Jalandhar admin reading Phagwara report returns 404')
 
-    // Jalandhar citizen attempting to upvote / join Phagwara report
     const resUpvoteCross = await request(port, 'POST', `/api/reports/${pReport._id}/upvote`, jCitizenToken)
     assert(resUpvoteCross.status === 404, 'Jalandhar citizen upvoting Phagwara report returns 404')
 
     const resJoinCross = await request(port, 'POST', `/api/reports/${pReport._id}/join`, jCitizenToken)
     assert(resJoinCross.status === 404, 'Jalandhar citizen joining Phagwara report returns 404')
 
-    // Cross-city comments
     const resCommentCross = await request(port, 'POST', `/api/reports/${pReport._id}/comments`, jCitizenToken, {
       text: 'Cross city comment attempt',
     })
     assert(resCommentCross.status === 404, 'Cross-city comment attempt returns 404')
 
-    // Cross-city dispute
     const resDisputeCross = await request(port, 'POST', `/api/reports/${pReport._id}/dispute`, jCitizenToken, {
       reason: 'Cross city dispute attempt',
     })
     assert(resDisputeCross.status === 404, 'Cross-city dispute attempt returns 404')
 
-    // Cross-city admin assign
     const resAssignCross = await request(port, 'PATCH', `/api/reports/${pReport._id}/assign`, jAdminToken, {
       staffId: jStaff._id,
     })
     assert(resAssignCross.status === 404, 'Jalandhar admin assigning Phagwara report returns 404')
 
-    // Cross-city admin resolve dispute
     const resResolveDispCross = await request(port, 'PATCH', `/api/reports/${pReport._id}/resolve-dispute`, jAdminToken, {
       action: 'mark_resolved',
       note: 'Illegal override',
     })
     assert(resResolveDispCross.status === 404, 'Jalandhar admin resolving Phagwara dispute returns 404')
 
-    // Cross-city staff status update
     const resStatusCross = await request(port, 'PATCH', `/api/reports/${pReport._id}/status`, jStaffToken, {
       status: 'acknowledged',
     })
     assert(resStatusCross.status === 404, 'Jalandhar staff updating Phagwara report status returns 404')
 
     console.log('\n--- 2. List & Query Scoping (Reports, Staff, Departments, Analytics) ---')
-    // Admin list of reports
     const resJReports = await request(port, 'GET', '/api/reports', jAdminToken)
     assert(resJReports.status === 200, 'Jalandhar admin successfully gets reports')
     const allJalandhar = resJReports.data.reports.every(
@@ -200,30 +249,25 @@ async function runTests() {
     )
     assert(allJalandhar && resJReports.data.reports.length > 0, 'All reports returned to Jalandhar admin belong strictly to Jalandhar')
 
-    // Staff list
     const resJStaff = await request(port, 'GET', '/api/staff', jAdminToken)
     assert(resJStaff.status === 200, 'Jalandhar admin successfully gets staff')
     const allJStaff = resJStaff.data.staff.every((s) => s.email.includes('jalandhar'))
     assert(allJStaff, 'All staff returned belong strictly to Jalandhar')
 
-    // Cross-city staff history
     const resCrossStaffTickets = await request(port, 'GET', `/api/staff/${pStaff._id}/tickets`, jAdminToken)
     assert(resCrossStaffTickets.status === 404, 'Jalandhar admin requesting Phagwara staff tickets returns 404')
 
-    // Departments list
     const resJDepts = await request(port, 'GET', '/api/departments', jAdminToken)
     const allJDepts = resJDepts.data.departments.every(
       (d) => d.municipality.toString() === jalandhar._id.toString()
     )
     assert(allJDepts, 'All departments returned belong strictly to caller municipality')
 
-    // Analytics overview
     const resOverview = await request(port, 'GET', '/api/analytics/overview', jAdminToken)
     const countInJalandharDb = await Report.countDocuments({ municipality: jalandhar._id })
     assert(resOverview.data.totalReports === countInJalandharDb, 'Analytics overview total matches exactly Jalandhar report count')
 
     console.log('\n--- 3. Nearby & Duplicate Isolation ---')
-    // Jalandhar user nearby query at Jalandhar centroid should NEVER return Phagwara reports
     const resNearby = await request(
       port,
       'GET',
@@ -236,12 +280,10 @@ async function runTests() {
     assert(!anyPhagwaraNearby, 'Nearby reports query for Jalandhar citizen never includes Phagwara reports')
 
     console.log('\n--- 4. Token Version & Superadmin Restrictions ---')
-    // Token with old tokenVersion rejected
     const expiredToken = signToken(jCitizen, 999)
     const resExpired = await request(port, 'GET', '/api/reports/mine', expiredToken)
     assert(resExpired.status === 401, 'Token with old/mismatched tokenVersion is rejected (401)')
 
-    // Superadmin has no municipality and is refused by report routes
     const resSuperAdminReports = await request(port, 'GET', '/api/reports', superAdminToken)
     assert(resSuperAdminReports.status === 403, 'Superadmin token is refused (403) by report routes')
 
@@ -251,7 +293,6 @@ async function runTests() {
     console.log('\n--- 5. Socket.io Authentication & Tenant Room Isolation ---')
     const socketUrl = `http://127.0.0.1:${port}`
 
-    // 5a. Socket without token rejected
     const noTokenSocket = ClientIO(socketUrl, {
       transports: ['websocket'],
       autoConnect: false,
@@ -263,7 +304,6 @@ async function runTests() {
     assert(noTokenErr.includes('Authentication error'), 'Socket without valid token is rejected')
     noTokenSocket.close()
 
-    // 5b. Socket with wrong tokenVersion rejected
     const badVerSocket = ClientIO(socketUrl, {
       auth: { token: expiredToken },
       transports: ['websocket'],
@@ -276,14 +316,12 @@ async function runTests() {
     assert(badVerErr.includes('Authentication error'), 'Socket with bad tokenVersion is rejected')
     badVerSocket.close()
 
-    // 5c. Jalandhar Admin socket connects and joins muni:<jalandharId>:admins room
     const jAdminSocket = ClientIO(socketUrl, {
       auth: { token: jAdminToken },
       transports: ['websocket'],
     })
     await new Promise((resolve) => jAdminSocket.on('connect', resolve))
 
-    // Phagwara Admin socket connects
     const pAdminSocket = ClientIO(socketUrl, {
       auth: { token: pAdminToken },
       transports: ['websocket'],
@@ -296,13 +334,11 @@ async function runTests() {
     jAdminSocket.on('test_tenant_alert', () => { jReceived = true })
     pAdminSocket.on('test_tenant_alert', () => { pReceived = true })
 
-    // Emit event specifically to Jalandhar admins
     await notifyAdmins(jalandhar._id, 'test_tenant_alert', { msg: 'Jalandhar Alert Only' })
 
-    // Wait 400ms for websocket delivery
     await new Promise((r) => setTimeout(r, 400))
 
-    assert(jReceived === true, 'Jalandhar admin received event targeted to Jalandhar')
+    assert(jReceived === true,  'Jalandhar admin received event targeted to Jalandhar')
     assert(pReceived === false, 'Phagwara admin NEVER received Jalandhar event (Room isolation verified)')
 
     jAdminSocket.close()
@@ -314,12 +350,24 @@ async function runTests() {
 
     if (failed > 0) {
       process.exit(1)
-    } else {
-      process.exit(0)
     }
   } catch (err) {
     console.error('Test execution error:', err)
-    process.exit(1)
+    // Do NOT exit here — let the finally block run first
+    process.exitCode = 1
+  } finally {
+    // ── Teardown: always runs, even when an assertion or exception fails ───
+    console.log('\n🧹 Cleaning up tenant isolation test fixtures…')
+    await cleanup()
+
+    server.close()
+    await disconnectTestDB()
+
+    if (process.exitCode !== 1) {
+      process.exit(0)
+    } else {
+      process.exit(1)
+    }
   }
 }
 

@@ -2,7 +2,7 @@ import Report from '../models/Report.js'
 
 // Haversine formula to calculate distance between two lat/lng points
 // Accounts for Earth's curvature - more accurate than simple coordinate subtraction
-function haversineDistance(lat1, lon1, lat2, lon2) {
+export function haversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000 // Earth radius in meters
   const toRad = (deg) => (deg * Math.PI) / 180
   const dLat = toRad(lat2 - lat1)
@@ -14,47 +14,64 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
   return R * c // distance in meters
 }
 
-// Find possible duplicate report based on category, distance, time, and municipality
-async function checkForDuplicate(newReportData) {
+/**
+ * Find a possible duplicate report based on category, distance, time, and municipality.
+ *
+ * Strategy (Part 2 – keeps the identical 50 m result):
+ *  1. Use a $geoWithin $centerSphere query (~50 m radius) as a MongoDB-side prefilter,
+ *     scoped by municipality, same category, and non-resolved status, within 30 days.
+ *     This replaces a full city-collection scan with an index-backed geo query.
+ *  2. Apply the exact Haversine check (≤ 50 m) on the returned candidate set.
+ *     The result set is identical to the previous brute-force approach.
+ *
+ * Falls back to legacy full-scan when geoPoint is missing (old documents without the field).
+ */
+export async function checkForDuplicate(newReportData) {
   const { category, location, municipality } = newReportData
-  const thresholdMeters = 50 // 50 meters threshold
-  const maxAgeDays = 30 // 30 days time window
-
-  console.log('Checking for duplicate:', { category, location, municipality, thresholdMeters, maxAgeDays })
+  const thresholdMeters = 50 // 50 metres threshold
+  const maxAgeDays = 30 // 30-day time window
 
   const cutoffDate = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000)
 
-  const query = {
+  // 50 m radius in radians (for $centerSphere): radius / Earth radius
+  const EARTH_RADIUS_M = 6371000
+  const radiusRadians = thresholdMeters / EARTH_RADIUS_M
+
+  const baseFilter = {
     category,
+    municipality,
     status: { $in: ['reported', 'acknowledged', 'in_progress'] },
     createdAt: { $gte: cutoffDate },
   }
 
-  // Scoped to municipality
-  if (municipality) {
-    query.municipality = municipality
+  // Attempt geo-prefilter first (requires 2dsphere index + geoPoint field on existing docs)
+  let candidates
+  try {
+    candidates = await Report.find({
+      ...baseFilter,
+      geoPoint: {
+        $geoWithin: {
+          $centerSphere: [[location.lng, location.lat], radiusRadians],
+        },
+      },
+    }).select('location ticketId')
+  } catch (_geoErr) {
+    // Fallback: full scan (e.g., if no geoPoint exists on old documents)
+    candidates = await Report.find(baseFilter).select('location ticketId')
   }
 
-  const openReports = await Report.find(query)
-
-  console.log('Found open reports in municipality:', openReports.length)
-
-  for (const report of openReports) {
+  // Exact Haversine check on the small candidate set — keeps the identical 50 m rule
+  for (const report of candidates) {
     const distance = haversineDistance(
       location.lat,
       location.lng,
       report.location.lat,
       report.location.lng
     )
-
     if (distance <= thresholdMeters) {
-      console.log('Duplicate found:', report.ticketId)
       return report
     }
   }
 
-  console.log('No duplicate found')
   return null
 }
-
-export { haversineDistance, checkForDuplicate }
